@@ -132,7 +132,12 @@ func newBackendTS(t *testing.T, b *fakeBackend) *httptest.Server {
 
 func newHMTS(t *testing.T, hm session.HostManager) *httptest.Server {
 	t.Helper()
-	ts := httptest.NewServer(NewServer(tok, slog.New(slog.NewTextHandler(io.Discard, nil)), hm))
+	return newHMRecentTS(t, hm, nil)
+}
+
+func newHMRecentTS(t *testing.T, hm session.HostManager, recent session.RecentDirs) *httptest.Server {
+	t.Helper()
+	ts := httptest.NewServer(NewServer(tok, slog.New(slog.NewTextHandler(io.Discard, nil)), hm, recent))
 	t.Cleanup(ts.Close)
 	return ts
 }

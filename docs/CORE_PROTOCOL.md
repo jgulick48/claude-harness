@@ -133,7 +133,8 @@ waiting, the host is `disconnected` with `retryAt` set. Failures that need the
 user (`host_key_unknown`, a changed host key, no usable SSH keys, an
 authentication failure) are **not** retried. They stay in `host_key_unknown`
 or `error` until the user acts. `hosts.connect` retries immediately and resets
-the backoff. A successful connect resets it too. The UI reattaches open views
+the backoff. The backoff also resets when a connection is lost after staying
+up for at least 30 s, so a host that accepts and then drops at once isn't retried every second. The UI reattaches open views
 once the host is back.
 
 Event `sessions.changed`, pushed on connect for each host and whenever that

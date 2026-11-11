@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { useCore } from './CoreContext'
 import { UpdateBanner } from './UpdateBanner'
+import { loadCollapsed, saveCollapsed, toggleCollapsed } from './collapse'
 import {
   canCreateOn,
   canReconnect,
   displayPath,
   hostStatusText,
+  reconnectText,
   sessionLabel,
   sortSessions,
   trustKeyParams,
@@ -216,6 +218,23 @@ export function Sidebar(): React.JSX.Element {
   const [hostMenu, setHostMenu] = useState<HostMenuState | null>(null)
   // Hosts whose trust panel the user collapsed with Cancel (state is unchanged).
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  // Host groups the user folded away (persisted).
+  const [folded, setFolded] = useState<Set<string>>(() => loadCollapsed())
+  const toggleFold = (id: string): void =>
+    setFolded((f) => {
+      const n = toggleCollapsed(f, id)
+      saveCollapsed(n)
+      return n
+    })
+  // One-second tick while any host is counting down to an automatic retry.
+  const [now, setNow] = useState(() => Date.now())
+  const counting = state.hosts.some((h) => h.state === 'disconnected' && h.retryAt !== undefined)
+  useEffect(() => {
+    if (!counting) return
+    setNow(Date.now())
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [counting])
   const [actionError, setActionError] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -271,7 +290,9 @@ export function Sidebar(): React.JSX.Element {
         {state.hosts.map((host) => {
           const sessions = sortSessions(state.sessions[host.id] ?? [])
           const ok = host.state === 'connected'
-          const statusText = hostStatusText(host)
+          const retrying = host.state === 'disconnected' && host.retryAt !== undefined
+          const statusText = retrying ? reconnectText(host.retryAt!, now) : hostStatusText(host)
+          const isFolded = folded.has(host.id)
           const isSsh = host.kind === 'ssh'
           // A changed key re-opens the panel: collapse is per host and fingerprint.
           const trustId = `${host.id}|${host.hostKey?.fingerprint ?? ''}`
@@ -289,12 +310,22 @@ export function Sidebar(): React.JSX.Element {
                   openHostMenu(e.clientX, e.clientY)
                 }}
               >
+                <button
+                  className="chevron"
+                  aria-expanded={!isFolded}
+                  aria-label={`${isFolded ? 'Expand' : 'Collapse'} ${host.name}`}
+                  onClick={() => toggleFold(host.id)}
+                >
+                  <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true" className={isFolded ? 'folded' : ''}>
+                    <path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                  </svg>
+                </button>
                 <span
                   className={`dot ${ok ? 'ok' : host.state === 'connecting' ? 'pending' : 'bad'}`}
                   title={ok ? 'Connected' : statusText}
                   aria-label={host.state.replace(/_/g, ' ')}
                 />
-                <span className="host-name" title={host.target}>
+                <span className="host-name" title={host.target} onClick={() => toggleFold(host.id)}>
                   {host.name}
                 </span>
                 <span className="host-count">{ok ? sessions.length : ''}</span>
@@ -329,13 +360,15 @@ export function Sidebar(): React.JSX.Element {
               )}
               {(host.state === 'unavailable' || host.state === 'disconnected' || host.state === 'error') && (
                 <div className="host-status error">
-                  <span className="host-error-text">{statusText}</span>
+                  <span className="host-error-text" title={retrying ? host.error : undefined}>
+                    {statusText}
+                  </span>
                   {canReconnect(host) && (
                     <button
                       className="btn small"
                       onClick={() => client && act(client.request('hosts.connect', { host: host.id }))}
                     >
-                      Reconnect
+                      {retrying ? 'Reconnect now' : 'Reconnect'}
                     </button>
                   )}
                 </div>
@@ -364,10 +397,11 @@ export function Sidebar(): React.JSX.Element {
                     onCancel={() => setCollapsed((c) => new Set(c).add(trustId))}
                   />
                 ))}
-              {ok && sessions.length === 0 && (
+              {ok && !isFolded && sessions.length === 0 && (
                 <p className="muted empty">No sessions. Click + to open a terminal</p>
               )}
               {ok &&
+                !isFolded &&
                 sessions.map((s) => {
                   const isActive = state.active?.host === host.id && state.active.session === s.id
                   const path = displayPath(s.cwd, host.home ?? '')

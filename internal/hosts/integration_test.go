@@ -151,3 +151,84 @@ func TestIntegrationSSHHostLifecycle(t *testing.T) {
 		t.Fatalf("session %v not in %v after reconnect", s, list)
 	}
 }
+
+func TestIntegrationAutoReconnect(t *testing.T) {
+	tmuxOK(t)
+	t.Setenv("TMUX", "")
+	rb := make([]byte, 4)
+	rand.Read(rb)
+	socket := "harness-hosts-test-" + hex.EncodeToString(rb)
+	home := t.TempDir()
+	key := sshtest.NewKey(t)
+	server := sshtest.Start(t, sshtest.Options{
+		AuthorizedKeys: []ssh.PublicKey{key.PublicKey()},
+		Env:            []string{"SHELL=/bin/sh", "HOME=" + home},
+	})
+	t.Cleanup(func() {
+		exec.Command("tmux", "-L", socket, "kill-server").Run()
+		d := os.Getenv("TMUX_TMPDIR")
+		if d == "" {
+			d = "/tmp"
+		}
+		os.Remove(filepath.Join(d, fmt.Sprintf("tmux-%d", os.Getuid()), socket))
+	})
+	dir := t.TempDir()
+	config := filepath.Join(dir, "config")
+	known := filepath.Join(dir, "known_hosts")
+	if err := os.WriteFile(config, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	u, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := hosts.New(hosts.Options{
+		File: filepath.Join(dir, "hosts.json"),
+		SSH: sshconn.Options{ConfigFile: config, KnownHostsFile: known,
+			AgentSocket: sshtest.StartAgent(t, key), Timeout: 10 * time.Second},
+		TmuxOptions: tmuxbackend.Options{Socket: socket, Config: "/dev/null", Home: home,
+			PollInterval: 100 * time.Millisecond},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hosts.SetRetryBackoff(m, 50*time.Millisecond, 200*time.Millisecond)
+	t.Cleanup(func() { m.Close() })
+	ctx := context.Background()
+
+	added, err := m.Add(ctx, fmt.Sprintf("%s@127.0.0.1:%d", u.Username, server.Port), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := waitHost(t, m, added.ID, session.HostKeyUnknown)
+	if h.HostKey == nil || h.HostKey.Fingerprint != ssh.FingerprintSHA256(server.HostKey) {
+		t.Fatalf("host key %+v", h.HostKey)
+	}
+	if err := m.TrustHostKey(ctx, added.ID, h.HostKey.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	waitHost(t, m, added.ID, session.HostConnected)
+
+	b, _ := m.Backend(added.ID)
+	s, err := b.Create(ctx, session.CreateOptions{Name: "hosts-it"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	server.DropConnections()
+	// No Connect call: the manager notices the loss and reconnects by itself.
+	waitHost(t, m, added.ID, session.HostDisconnected)
+	waitHost(t, m, added.ID, session.HostConnected)
+	list, err := b.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, x := range list {
+		found = found || x.ID == s.ID
+	}
+	if !found {
+		t.Fatalf("session %v not in %v after auto-reconnect", s, list)
+	}
+}

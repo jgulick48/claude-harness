@@ -46,15 +46,18 @@ const isolatedSocket = `harness-uitest-basic-${process.pid}`
 // The hosts file lives in a fresh temp dir so tests never read the real one.
 const hostsDir = mkdtempSync(join(tmpdir(), 'harness-uitest-hosts-'))
 const hostsFile = join(hostsDir, 'hosts.json')
+// Same for the state file (recent directories), so the real one is never touched.
+const stateFile = join(hostsDir, 'state.json')
 afterAll(() => rmSync(hostsDir, { recursive: true, force: true }))
 const isolatedEnv = {
   HARNESS_TMUX_SOCKET: isolatedSocket,
   HARNESS_TMUX_CONFIG: '/dev/null',
-  HARNESS_HOSTS_FILE: hostsFile
+  HARNESS_HOSTS_FILE: hostsFile,
+  HARNESS_STATE_FILE: stateFile
 }
 
 describe.skipIf(!exists)('harness-core integration', () => {
-  it('starts, speaks protocol v3, and stops cleanly', async () => {
+  it('starts, speaks protocol v4, and stops cleanly', async () => {
     const logs: string[] = []
     const core = await startCore(corePath, { logger: (l) => logs.push(l), env: isolatedEnv })
     let exitCode: number | null | undefined
@@ -65,13 +68,13 @@ describe.skipIf(!exists)('harness-core integration', () => {
       })
     )
     try {
-      expect(core.info.protocol).toBe(3)
+      expect(core.info.protocol).toBe(4)
       expect(core.info.version).toBeTruthy()
       expect(core.info.url).toBe(`ws://127.0.0.1:${core.info.port}/ws`)
 
       const { ws, next } = await openWS(`${core.info.url}?token=${core.info.token}`)
       const hello = await next()
-      expect(hello).toMatchObject({ type: 'hello', protocol: 3, version: core.info.version })
+      expect(hello).toMatchObject({ type: 'hello', protocol: 4, version: core.info.version })
       ws.send(JSON.stringify({ type: 'ping', id: 7 }))
       // The pong and the initial events (hosts.changed, sessions.changed) are
       // sent from different goroutines, so they can arrive in either order.
@@ -217,13 +220,19 @@ describe.skipIf(!exists || !hasTmux)('harness-core tmux scenario', () => {
 
   it('creates a session, attaches, runs a command, detaches and kills', async () => {
     const core = await startCore(corePath, {
-      env: { HARNESS_TMUX_SOCKET: socket, HARNESS_TMUX_CONFIG: '/dev/null', HARNESS_HOSTS_FILE: hostsFile, SHELL: '/bin/sh' }
+      env: { HARNESS_TMUX_SOCKET: socket, HARNESS_TMUX_CONFIG: '/dev/null', HARNESS_HOSTS_FILE: hostsFile, HARNESS_STATE_FILE: stateFile, SHELL: '/bin/sh' }
     })
     try {
       const c = await connect(`${core.info.url}?token=${core.info.token}`)
       try {
         const hosts = await c.request('hosts.list')
         expect(hosts.find((h: any) => h.id === 'local')).toMatchObject({ state: 'connected' })
+
+        // v4: directory suggestions. A fresh state file has no recent entries.
+        const before = await c.request('remote.suggestDirs', { host: 'local' })
+        expect(Array.isArray(before.recent)).toBe(true)
+        expect(Array.isArray(before.repos)).toBe(true)
+        expect(before.recent).toEqual([])
 
         const created = await c.request('sessions.create', {
           host: 'local',
@@ -246,6 +255,10 @@ describe.skipIf(!exists || !hasTmux)('harness-core tmux scenario', () => {
         c.send(stream, 'echo harness-$((6*7))\r')
         const text = await c.waitOutput(stream, /harness-42/)
         expect(text).toContain('harness-42')
+
+        // A successful create records its dir in the host's recent list.
+        const after = await c.request('remote.suggestDirs', { host: 'local' })
+        expect(after.recent).toContain(tmpdir())
 
         await c.request('term.detach', { stream })
         await c.request('sessions.kill', { host: 'local', session: created.id })

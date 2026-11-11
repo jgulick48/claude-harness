@@ -59,6 +59,24 @@ describe('store reducer', () => {
       expect(st.active).toEqual({ host: 'dev', session: '$1' })
     })
   })
+  describe('retryAt', () => {
+    it('is carried by hosts events and cleared when the host reconnects', () => {
+      const dev = (state: Host['state'], retryAt?: number): Host => ({ id: 'dev', name: 'dev', kind: 'ssh', state, retryAt })
+      let st = reducer(initialState, { type: 'hosts', hosts: [dev('disconnected', 12345)] })
+      expect(st.hosts[0].retryAt).toBe(12345)
+      st = reducer(st, { type: 'hosts', hosts: [dev('connected')] })
+      expect(st.hosts[0].retryAt).toBeUndefined()
+    })
+    it('keeps the active view and its session list while a host retries', () => {
+      const dev = (state: Host['state'], retryAt?: number): Host => ({ id: 'dev', name: 'dev', kind: 'ssh', state, retryAt })
+      let st = reducer(initialState, { type: 'hosts', hosts: [dev('connected')] })
+      st = reducer(st, { type: 'sessions', host: 'dev', sessions: [s('$1')] })
+      st = reducer(st, { type: 'attach', ref: { host: 'dev', session: '$1' } })
+      st = reducer(st, { type: 'hosts', hosts: [dev('disconnected', 99)] })
+      expect(st.active).toEqual({ host: 'dev', session: '$1' })
+      expect(st.sessions.dev).toHaveLength(1)
+    })
+  })
   it('add-host dialog toggles', () => {
     let st = reducer(initialState, { type: 'openAddHost' })
     expect(st.addHostOpen).toBe(true)

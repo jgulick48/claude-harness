@@ -21,7 +21,7 @@ import (
 )
 
 // testHostsFile keeps tests away from the real hosts file.
-var testHostsFile string
+var testHostsFile, testStateFile string
 
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "harness-core-test")
@@ -29,6 +29,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	testHostsFile = filepath.Join(dir, "hosts.json")
+	testStateFile = filepath.Join(dir, "state.json")
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
@@ -41,6 +42,9 @@ func env(m map[string]string) func(string) string {
 		}
 		if k == "HARNESS_HOSTS_FILE" {
 			return testHostsFile
+		}
+		if k == "HARNESS_STATE_FILE" {
+			return testStateFile
 		}
 		return ""
 	}
@@ -126,7 +130,7 @@ func TestRunHappyPath(t *testing.T) {
 	if err := json.Unmarshal([]byte(line), &ready); err != nil {
 		t.Fatal(err)
 	}
-	if ready.Type != "ready" || ready.Port == 0 || ready.Protocol != 3 || ready.Version != version.Version {
+	if ready.Type != "ready" || ready.Port == 0 || ready.Protocol != 4 || ready.Version != version.Version {
 		t.Fatalf("ready: %+v", ready)
 	}
 	go io.Copy(io.Discard, stdoutR)

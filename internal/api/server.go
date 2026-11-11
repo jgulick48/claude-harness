@@ -28,12 +28,15 @@ type server struct {
 	token  string
 	logger *slog.Logger
 	hm     session.HostManager
+	recent session.RecentDirs // may be nil
 }
 
 // NewServer returns the handler serving /healthz and /ws, guarded by token.
 // hm owns the hosts; the API follows its changes while connections are open.
-func NewServer(token string, logger *slog.Logger, hm session.HostManager) http.Handler {
-	s := &server{token: token, logger: logger, hm: hm}
+// recent remembers directories used to create sessions; nil disables recording
+// (suggestions then carry an empty recent list).
+func NewServer(token string, logger *slog.Logger, hm session.HostManager, recent session.RecentDirs) http.Handler {
+	s := &server{token: token, logger: logger, hm: hm, recent: recent}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /ws", s.ws)
@@ -545,7 +548,14 @@ func (cn *conn) call(method string, id int64, p *params) (any, error) {
 		}
 		return list, nil
 	case "sessions.create":
-		return orErr(b.Create(ctx, session.CreateOptions{Dir: p.Dir, Name: p.Name, Command: p.Command}))
+		sess, err := b.Create(ctx, session.CreateOptions{Dir: p.Dir, Name: p.Name, Command: p.Command})
+		if err != nil {
+			return nil, err
+		}
+		if cn.s.recent != nil {
+			cn.s.recent.Add(p.Host, p.Dir)
+		}
+		return sess, nil
 	case "sessions.kill":
 		if err := need("session", p.Session); err != nil {
 			return nil, err
@@ -607,7 +617,13 @@ func (cn *conn) hostsCall(method string, p *params) (any, error) {
 		if err := need("host", p.Host); err != nil {
 			return nil, err
 		}
-		return nil, hm.Remove(ctx, p.Host)
+		if err := hm.Remove(ctx, p.Host); err != nil {
+			return nil, err
+		}
+		if cn.s.recent != nil {
+			cn.s.recent.Forget(p.Host)
+		}
+		return nil, nil
 	case "hosts.connect":
 		if err := need("host", p.Host); err != nil {
 			return nil, err
@@ -626,13 +642,6 @@ func (cn *conn) hostsCall(method string, p *params) (any, error) {
 }
 
 func orErr2(v session.Host, err error) (any, error) {
-	if err != nil {
-		return nil, err
-	}
-	return v, nil
-}
-
-func orErr(v session.Session, err error) (any, error) {
 	if err != nil {
 		return nil, err
 	}

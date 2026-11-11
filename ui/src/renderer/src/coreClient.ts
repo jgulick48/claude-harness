@@ -1,5 +1,5 @@
-// Framework-free WebSocket client for harness-core (protocol v3).
-export const EXPECTED_PROTOCOL = 3
+// Framework-free WebSocket client for harness-core (protocol v4).
+export const EXPECTED_PROTOCOL = 4
 
 export type ClientState =
   | { state: 'connecting' }

@@ -68,3 +68,8 @@ func (e *HostKeyChangedError) Error() string {
 
 // ErrNoAuthMethods: no agent keys or usable identity files.
 var ErrNoAuthMethods = errors.New("no SSH authentication methods available")
+
+// ErrConnectionLost is wrapped by Client.Err when an established connection
+// ends on its own (remote close, keepalive failure). Its text is
+// "connection lost".
+var ErrConnectionLost = errors.New("connection lost")

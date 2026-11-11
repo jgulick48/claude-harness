@@ -51,7 +51,7 @@ function setup(now = () => 0) {
   return { states, ws, client }
 }
 
-const hello = { type: 'hello', version: '0.1.0-dev', protocol: 3 }
+const hello = { type: 'hello', version: '0.1.0-dev', protocol: 4 }
 
 describe('coreClient', () => {
   it('passes token in the query string and requests arraybuffers', () => {
@@ -63,7 +63,7 @@ describe('coreClient', () => {
   it('hello -> ready, then pings', () => {
     const { states, ws, client } = setup()
     ws.recv(hello)
-    expect(states.at(-1)).toEqual({ state: 'ready', version: '0.1.0-dev', protocol: 3, latencyMs: null })
+    expect(states.at(-1)).toEqual({ state: 'ready', version: '0.1.0-dev', protocol: 4, latencyMs: null })
     expect(ws.json(0)).toEqual({ type: 'ping', id: 1 })
     client.close()
   })
