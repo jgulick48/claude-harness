@@ -18,8 +18,14 @@
   font-size: 14px;
 }
 
+/* App theme: System follows the OS; <html data-theme="light|dark"> overrides it.
+   The dark block is duplicated on purpose (no preprocessor). */
+:root {
+  color-scheme: light;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --bg: #14161a;
     --bg-sidebar: #1b1e24;
     --fg: #e6e8eb;
@@ -34,7 +40,26 @@
     --term-selection: #34507a;
     --ok: #3fb950;
     --warn: #d29922;
+    color-scheme: dark;
   }
+}
+
+:root[data-theme='dark'] {
+  --bg: #14161a;
+  --bg-sidebar: #1b1e24;
+  --fg: #e6e8eb;
+  --fg-muted: #8b93a1;
+  --border: #2c313a;
+  --error: #f97066;
+  --accent: #5b9cf8;
+  --hover: #262a32;
+  --term-bg: #14161a;
+  --term-fg: #e6e8eb;
+  --term-cursor: #e6e8eb;
+  --term-selection: #34507a;
+  --ok: #3fb950;
+  --warn: #d29922;
+  color-scheme: dark;
 }
 
 * {

@@ -18,6 +18,7 @@ export const bridgeKeys: Record<keyof HarnessApi, true> = {
   focusWindow: true,
   readClipboard: true,
   writeClipboard: true,
+  setThemeSource: true,
   showTerminalMenu: true
 }
 
@@ -32,6 +33,8 @@ export interface E2EHooks {
   focused: number
   /** In-memory stand-in for the system clipboard. */
   clipboard: string
+  /** Last value passed to setThemeSource, or null. */
+  themeSource: 'system' | 'light' | 'dark' | null
 }
 
 declare global {
@@ -45,7 +48,7 @@ declare global {
  * `HarnessApi` annotation makes the compiler reject a missing or extra member.
  */
 export function installFakeBridge(info: CoreInfo): void {
-  const hooks: E2EHooks = { resume: null, resizes: 0, attention: -1, focused: 0, clipboard: '' }
+  const hooks: E2EHooks = { resume: null, resizes: 0, attention: -1, focused: 0, clipboard: '', themeSource: null }
   window.__e2e = hooks
   // Count term.resize requests (JSON text frames), e.g. to catch refit loops.
   const send = WebSocket.prototype.send
@@ -81,6 +84,9 @@ export function installFakeBridge(info: CoreInfo): void {
     readClipboard: async () => hooks.clipboard,
     writeClipboard: async (text) => {
       hooks.clipboard = text
+    },
+    setThemeSource: (source) => {
+      hooks.themeSource = source
     },
     showTerminalMenu: async () => null
   }

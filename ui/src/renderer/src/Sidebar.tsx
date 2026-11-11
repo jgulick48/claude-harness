@@ -5,8 +5,32 @@ import { HooksDialog, type HooksMode } from './HooksDialog'
 import { HostCheckDialog } from './HostCheckDialog'
 import { canRunCheckFromStatus } from './hostCheck'
 import { StatusBadge } from './StatusBadge'
-import { canRemoveHooks, hooksNotice, orderSessions, waitingCount } from './claudeStatus'
-import { ATTENTION_SORT_KEY, loadFlag, NOTIFICATIONS_KEY, saveFlag } from './prefs'
+import { canRemoveHooks, hooksNotice, orderSessions, statusInfo, waitingCount } from './claudeStatus'
+import {
+  ATTENTION_SORT_KEY,
+  loadFlag,
+  loadNumber,
+  NOTIFICATIONS_KEY,
+  saveFlag,
+  saveNumber,
+  SIDEBAR_RAIL_KEY,
+  SIDEBAR_WIDTH_KEY
+} from './prefs'
+import { openAppearance } from './appearance'
+import { visibleRefs } from './layout'
+import { highlightParts, matchCandidate } from './sidebarFilter'
+import {
+  clampWidth,
+  moveNav,
+  navRefs,
+  nthRef,
+  RAIL_WIDTH,
+  SIDEBAR_DEFAULT,
+  SIDEBAR_MAX,
+  SIDEBAR_MIN,
+  shortcutFor,
+  type NavRef
+} from './sidebarNav'
 import { loadCollapsed, saveCollapsed, toggleCollapsed } from './collapse'
 import {
   canCreateOn,
@@ -163,12 +187,14 @@ function SettingsMenu({
   y,
   notify,
   onToggleNotify,
+  onAppearance,
   onClose
 }: {
   x: number
   y: number
   notify: boolean
   onToggleNotify: () => void
+  onAppearance: () => void
   onClose: () => void
 }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
@@ -178,6 +204,9 @@ function SettingsMenu({
       <button className="ctx-item" role="menuitemcheckbox" aria-checked={notify} autoFocus onClick={onToggleNotify}>
         {notify ? '✓ ' : ''}Notifications
       </button>
+      <button className="ctx-item" role="menuitem" onClick={onAppearance}>
+        Appearance…
+      </button>
     </div>
   )
 }
@@ -186,10 +215,12 @@ function ContextMenu({
   menu,
   onRename,
   onKill,
+  onSplit,
   onChange,
   onClose
 }: {
   menu: MenuState
+  onSplit: (direction: 'right' | 'down') => void
   onRename: () => void
   onKill: () => void
   onChange: (m: MenuState) => void
@@ -211,7 +242,13 @@ function ContextMenu({
         </>
       ) : (
         <>
-          <button className="ctx-item" role="menuitem" autoFocus onClick={onRename}>
+          <button className="ctx-item" role="menuitem" autoFocus onClick={() => onSplit('right')}>
+            Open in split right
+          </button>
+          <button className="ctx-item" role="menuitem" onClick={() => onSplit('down')}>
+            Open in split down
+          </button>
+          <button className="ctx-item" role="menuitem" onClick={onRename}>
             Rename…
           </button>
           <button
@@ -255,6 +292,75 @@ function RenameInput({
   )
 }
 
+function RailView({
+  groups,
+  active,
+  visible,
+  onToggle,
+  onAttach,
+  onContext
+}: {
+  groups: { host: Host; ok: boolean; items: { s: Session; label: string }[] }[]
+  active: { host: string; session: string } | null
+  visible: Set<string>
+  onToggle: () => void
+  onAttach: (r: NavRef) => void
+  onContext: (e: React.MouseEvent, host: Host, session: Session) => void
+}): React.JSX.Element {
+  return (
+    <>
+      <header className="rail-header">
+        <button
+          className="icon-button"
+          title="Expand sidebar (Ctrl/Cmd+B)"
+          aria-label="Expand sidebar"
+          onClick={onToggle}
+        >
+          »
+        </button>
+      </header>
+      <div className="rail-body" data-testid="rail">
+        {groups.map(({ host, ok, items }) => (
+          <div className="rail-group" key={host.id}>
+            <span
+              className={`dot ${ok ? 'ok' : host.state === 'connecting' ? 'pending' : 'bad'}`}
+              title={`${host.name}: ${ok ? 'Connected' : hostStatusText(host)}`}
+              aria-label={`${host.name} ${host.state.replace(/_/g, ' ')}`}
+              role="img"
+            />
+            {items.map(({ s, label }) => {
+              const info = statusInfo(s)
+              const isActive = active?.host === host.id && active.session === s.id
+              const isOpen = !isActive && visible.has(`${host.id}/${s.id}`)
+              const text = info ? `${label} — ${info.label}` : label
+              return (
+                <button
+                  key={s.id}
+                  data-testid="rail-item"
+                  className={`rail-item${isActive ? ' active' : ''}${isOpen ? ' open' : ''}${info ? ` status-${info.status}` : ''}`}
+                  title={`${text} (${host.name})`}
+                  aria-label={text}
+                  aria-current={isActive ? 'true' : undefined}
+                  onClick={() => onAttach({ host: host.id, session: s.id })}
+                  onContextMenu={(e) => onContext(e, host, s)}
+                >
+                  {info ? (
+                    <span className="status-icon" aria-hidden="true">
+                      {info.icon}
+                    </span>
+                  ) : (
+                    <span className="rail-dot" aria-hidden="true" />
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
+
 export function Sidebar(): React.JSX.Element {
   const { state, dispatch, client, connected, status, statusIsError } = useCore()
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -294,23 +400,196 @@ export function Sidebar(): React.JSX.Element {
     p.catch((e: Error) => setActionError(e.message))
   }
 
+  const [rail, setRail] = useState(() => loadFlag(SIDEBAR_RAIL_KEY, false))
+  const [width, setWidth] = useState(() => clampWidth(loadNumber(SIDEBAR_WIDTH_KEY, SIDEBAR_DEFAULT)))
+  const [filter, setFilter] = useState('')
+  const filterRef = useRef<HTMLInputElement>(null)
+  const asideRef = useRef<HTMLElement>(null)
+  const pendingFilterFocus = useRef(false)
+
+  const query = rail ? '' : filter
+  const filtering = query.trim() !== ''
+  const groups = state.hosts.map((host) => {
+    const ok = host.state === 'connected'
+    const items = ok
+      ? orderSessions(state.sessions[host.id] ?? [], attentionSort).flatMap((s) => {
+          const label = sessionLabel(s)
+          const path = displayPath(s.cwd, host.home ?? '')
+          const m = matchCandidate(query, { label, path, host: host.name })
+          return m ? [{ s, label, path, labelIndices: m.labelIndices }] : []
+        })
+      : []
+    return { host, ok, items }
+  })
+  // Hosts with no matching sessions are hidden while a filter is active.
+  const shownGroups = filtering ? groups.filter((g) => g.items.length > 0) : groups
+  // Filtering shows every match even in a folded group; the rail ignores folds.
+  const isFoldedHost = (id: string): boolean => !filtering && !rail && folded.has(id)
+  const nav = navRefs(
+    shownGroups.map((g) => ({ host: g.host.id, folded: isFoldedHost(g.host.id), sessions: g.items.map((i) => i.s.id) }))
+  )
+  const visible = new Set(visibleRefs(state).map((r) => `${r.host}/${r.session}`))
+  const attachRef = (r: NavRef): void => dispatch({ type: 'attach', ref: r })
+  const splitRef = (r: NavRef, direction: 'right' | 'down' = 'right'): void =>
+    dispatch({ type: 'openInSplit', ref: r, direction })
+
+  const toggleRail = (): void =>
+    setRail((v) => {
+      saveFlag(SIDEBAR_RAIL_KEY, !v)
+      return !v
+    })
+
+  const focusTerminal = (): void => {
+    const t = document.querySelector<HTMLElement>('.xterm-helper-textarea')
+    if (t) t.focus()
+    else (document.activeElement as HTMLElement | null)?.blur()
+  }
+
+  // Global shortcuts. Capture phase + stopPropagation so they also work while
+  // a terminal has focus without the keystroke reaching the shell.
+  const latest = useRef({ nav, toggleRail, attachRef })
+  latest.current = { nav, toggleRail, attachRef }
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const sc = shortcutFor(e)
+      if (!sc) return
+      if (sc.kind === 'nth') {
+        if (document.querySelector('[role="dialog"]')) return
+        const r = nthRef(latest.current.nav, sc.n)
+        if (!r) return
+        e.preventDefault()
+        e.stopPropagation()
+        latest.current.attachRef(r)
+        return
+      }
+      e.preventDefault()
+      e.stopPropagation()
+      if (sc.kind === 'rail') {
+        latest.current.toggleRail()
+      } else if (filterRef.current) {
+        filterRef.current.focus()
+        filterRef.current.select()
+      } else {
+        // Rail is showing: expand, then focus once the input exists.
+        pendingFilterFocus.current = true
+        latest.current.toggleRail()
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
+  useEffect(() => {
+    if (!rail && pendingFilterFocus.current) {
+      pendingFilterFocus.current = false
+      filterRef.current?.focus()
+    }
+  }, [rail])
+
+  const focusRow = (r: NavRef): void => {
+    const rows = Array.from(listRef.current?.querySelectorAll<HTMLElement>('[data-row]') ?? [])
+    rows.find((el) => el.dataset.host === r.host && el.dataset.session === r.session)?.focus()
+  }
+
   const onListKey = (e: React.KeyboardEvent): void => {
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
-    const rows = Array.from(listRef.current?.querySelectorAll<HTMLElement>('[data-row]') ?? [])
-    if (!rows.length) return
+    const el = document.activeElement as HTMLElement | null
+    const cur = el?.dataset.row !== undefined ? { host: el.dataset.host ?? '', session: el.dataset.session ?? '' } : null
+    const dir = e.key === 'ArrowDown' ? 1 : -1
+    const next = moveNav(nav, cur, dir)
+    if (!next) return
     e.preventDefault()
-    const i = rows.indexOf(document.activeElement as HTMLElement)
-    const next = e.key === 'ArrowDown' ? Math.min(rows.length - 1, i + 1) : Math.max(0, i < 0 ? 0 : i - 1)
-    rows[next].focus()
+    if (cur && dir === -1 && next.host === cur.host && next.session === cur.session) {
+      filterRef.current?.focus()
+      return
+    }
+    focusRow(next)
+  }
+
+  const onFilterKey = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      if (filter) setFilter('')
+      else focusTerminal()
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      if (nav[0]) (e.shiftKey ? splitRef : attachRef)(nav[0])
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      if (nav[0]) focusRow(nav[0])
+    }
+  }
+
+  // Dragging (and arrow keys on the handle) only change the width; the
+  // terminal pane's ResizeObserver refits on its own.
+  const commitWidth = (w: number): void => {
+    const c = clampWidth(w)
+    setWidth(c)
+    saveNumber(SIDEBAR_WIDTH_KEY, c)
+  }
+  const onResizeDown = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    const el = e.currentTarget
+    el.setPointerCapture(e.pointerId)
+    const left = asideRef.current?.getBoundingClientRect().left ?? 0
+    let last = width
+    const move = (ev: PointerEvent): void => {
+      last = clampWidth(ev.clientX - left)
+      setWidth(last)
+    }
+    const up = (): void => {
+      el.removeEventListener('pointermove', move)
+      el.removeEventListener('pointerup', up)
+      el.removeEventListener('pointercancel', up)
+      saveNumber(SIDEBAR_WIDTH_KEY, last)
+    }
+    el.addEventListener('pointermove', move)
+    el.addEventListener('pointerup', up)
+    el.addEventListener('pointercancel', up)
+  }
+  const onResizeKey = (e: React.KeyboardEvent): void => {
+    const step = e.shiftKey ? 48 : 16
+    if (e.key === 'ArrowLeft') commitWidth(width - step)
+    else if (e.key === 'ArrowRight') commitWidth(width + step)
+    else if (e.key === 'Home') commitWidth(SIDEBAR_MIN)
+    else if (e.key === 'End') commitWidth(SIDEBAR_MAX)
+    else return
+    e.preventDefault()
   }
 
   const defaultHost = state.active?.host
 
   return (
-    <aside className="sidebar">
+    <aside
+      className={`sidebar${rail ? ' rail' : ''}`}
+      ref={asideRef}
+      style={{ ['--sidebar-width' as string]: `${rail ? RAIL_WIDTH : width}px` }}
+    >
+      {rail ? (
+        <RailView
+          groups={groups}
+          active={state.active}
+          visible={visible}
+          onToggle={toggleRail}
+          onAttach={attachRef}
+          onContext={(e, host, session) => {
+            e.preventDefault()
+            setMenu({ x: e.clientX, y: e.clientY, host, session, confirmKill: false })
+          }}
+        />
+      ) : (
+      <>
       <header className="sidebar-header">
         <span className="sidebar-title">SESSIONS</span>
         <span className="header-actions">
+        <button
+          className="icon-button"
+          title="Collapse sidebar (Ctrl/Cmd+B)"
+          aria-label="Collapse sidebar"
+          onClick={toggleRail}
+        >
+          «
+        </button>
         <button
           className="icon-button"
           aria-pressed={attentionSort}
@@ -363,14 +642,19 @@ export function Sidebar(): React.JSX.Element {
       </header>
       <div className="sidebar-body" ref={listRef} onKeyDown={onListKey}>
         {state.hosts.length === 0 && <p className="muted">{connected ? 'No hosts' : 'Waiting for core…'}</p>}
-        {state.hosts.map((host) => {
-          const sessions = orderSessions(state.sessions[host.id] ?? [], attentionSort)
+        {filtering && shownGroups.length === 0 && (
+          <p className="muted no-matches" role="status">
+            No matches
+          </p>
+        )}
+        {shownGroups.map(({ host, items }) => {
+          const sessions = items.map((i) => i.s)
           const waiting = waitingCount(sessions)
           const notice = hooksNotice(host)
           const ok = host.state === 'connected'
           const retrying = host.state === 'disconnected' && host.retryAt !== undefined
           const statusText = retrying ? reconnectText(host.retryAt!, now) : hostStatusText(host)
-          const isFolded = folded.has(host.id)
+          const isFolded = isFoldedHost(host.id)
           // A changed key re-opens the panel: collapse is per host and fingerprint.
           const trustId = `${host.id}|${host.hostKey?.fingerprint ?? ''}`
           const openHostMenu = (x: number, y: number): void => {
@@ -496,13 +780,14 @@ export function Sidebar(): React.JSX.Element {
                     onCancel={() => setCollapsed((c) => new Set(c).add(trustId))}
                   />
                 ))}
-              {ok && !isFolded && sessions.length === 0 && (
+              {ok && !isFolded && sessions.length === 0 && !filtering && (
                 <p className="muted empty">No sessions. Click + to open a terminal</p>
               )}
               {ok &&
                 !isFolded &&
-                sessions.map((s) => {
+                items.map(({ s, label, labelIndices }) => {
                   const isActive = state.active?.host === host.id && state.active.session === s.id
+                  const isOpen = !isActive && visible.has(`${host.id}/${s.id}`)
                   const path = displayPath(s.cwd, host.home ?? '')
                   const isRenaming = renaming?.host === host.id && renaming.id === s.id
                   const attach = (): void => dispatch({ type: 'attach', ref: { host: host.id, session: s.id } })
@@ -510,13 +795,20 @@ export function Sidebar(): React.JSX.Element {
                     <div
                       key={s.id}
                       data-row
+                      data-host={host.id}
+                      data-session={s.id}
+                      data-open={isOpen ? 'true' : undefined}
                       role="button"
                       tabIndex={0}
-                      className={`row${isActive ? ' active' : ''}`}
+                      className={`row${isActive ? ' active' : ''}${isOpen ? ' open' : ''}`}
                       aria-current={isActive ? 'true' : undefined}
                       onClick={() => !isRenaming && attach()}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !isRenaming) attach()
+                        if (e.key === 'Enter' && !isRenaming && e.target === e.currentTarget) {
+                          e.preventDefault()
+                          if (e.shiftKey) splitRef({ host: host.id, session: s.id }, 'right')
+                          else attach()
+                        }
                       }}
                       onContextMenu={(e) => {
                         e.preventDefault()
@@ -534,7 +826,11 @@ export function Sidebar(): React.JSX.Element {
                             }}
                           />
                         ) : (
-                          <span className="row-label">{sessionLabel(s)}</span>
+                          <span className="row-label">
+                            {highlightParts(label, labelIndices).map((p, i) =>
+                              p.hit ? <mark key={i}>{p.text}</mark> : <span key={i}>{p.text}</span>
+                            )}
+                          </span>
                         )}
                         {!s.managed && <span className="tag">external</span>}
                         <StatusBadge session={s} />
@@ -549,6 +845,39 @@ export function Sidebar(): React.JSX.Element {
           )
         })}
       </div>
+      <div className="sidebar-filter">
+        <input
+          ref={filterRef}
+          className="filter-input"
+          type="text"
+          value={filter}
+          placeholder="Filter…"
+          aria-label="Filter sessions"
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(e) => setFilter(e.target.value)}
+          onKeyDown={onFilterKey}
+        />
+        <kbd className="filter-hint" aria-hidden="true">
+          {typeof navigator !== 'undefined' && /mac/i.test(navigator.platform) ? '⌘K' : 'Ctrl+K'}
+        </kbd>
+      </div>
+      </>
+      )}
+      <div
+        className="sidebar-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        aria-valuemin={SIDEBAR_MIN}
+        aria-valuemax={SIDEBAR_MAX}
+        aria-valuenow={rail ? RAIL_WIDTH : width}
+        tabIndex={rail ? -1 : 0}
+        hidden={rail}
+        onPointerDown={onResizeDown}
+        onDoubleClick={() => commitWidth(SIDEBAR_DEFAULT)}
+        onKeyDown={onResizeKey}
+      />
       {actionError && <div className="action-error">{actionError}</div>}
       <UpdateBanner />
       <footer className={statusIsError ? 'status-line error' : 'status-line'}>{status}</footer>
@@ -584,6 +913,10 @@ export function Sidebar(): React.JSX.Element {
           x={settings.x}
           y={settings.y}
           notify={notify}
+          onAppearance={() => {
+            setSettings(null)
+            openAppearance()
+          }}
           onToggleNotify={() => {
             const v = !notify
             saveFlag(NOTIFICATIONS_KEY, v)
@@ -617,6 +950,11 @@ export function Sidebar(): React.JSX.Element {
           onRename={() => {
             setRenaming({ host: menu.host.id, id: menu.session.id })
             setMenu(null)
+          }}
+          onSplit={(direction) => {
+            const m = menu
+            setMenu(null)
+            dispatch({ type: 'openInSplit', ref: { host: m.host.id, session: m.session.id }, direction })
           }}
           onKill={() => {
             const m = menu
