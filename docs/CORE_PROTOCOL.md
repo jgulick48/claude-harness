@@ -1,7 +1,7 @@
 # Core ↔ UI protocol
 
 How the Electron app launches `harness-core` and talks to it. See
-[ARCHITECTURE.md](ARCHITECTURE.md) §3 and §7 for background. Protocol version: **5** (v2 added requests/results, events, sessions and terminals in M1; v3 added SSH host management in M2; v4 added auto-reconnect, `~/.ssh/config` import and directory suggestions in M3; v5 adds Claude Code status in M4).
+[ARCHITECTURE.md](ARCHITECTURE.md) §3 and §7 for background. Protocol version: **6** (v2 added requests/results, events, sessions and terminals in M1; v3 added SSH host management in M2; v4 added auto-reconnect, `~/.ssh/config` import and directory suggestions in M3; v5 added Claude Code status in M4; v6 adds the host setup check in M5).
 
 ## 1. Launch
 
@@ -19,7 +19,7 @@ How the Electron app launches `harness-core` and talks to it. See
    **exactly one line** to stdout, then nothing else to stdout:
 
    ```json
-   {"type":"ready","addr":"127.0.0.1:54321","port":54321,"version":"0.1.0-dev","protocol":5}
+   {"type":"ready","addr":"127.0.0.1:54321","port":54321,"version":"0.1.0-dev","protocol":6}
    ```
 
 4. All logs go to **stderr** (`log/slog` text format). The UI forwards them to
@@ -52,7 +52,7 @@ compared in constant time.
 
 | Endpoint | Auth | Response |
 |---|---|---|
-| `GET /healthz` | Header `Authorization: Bearer <token>` | `200 {"ok":true,"version":"…","protocol":5}`; `401` if the token is missing or wrong |
+| `GET /healthz` | Header `Authorization: Bearer <token>` | `200 {"ok":true,"version":"…","protocol":6}`; `401` if the token is missing or wrong |
 | `GET /ws?token=<token>` | Query parameter (browser WebSockets can't set headers) | WebSocket upgrade; `401` **before** upgrade if the token is missing or wrong |
 
 The WebSocket server doesn't check the Origin header, because the Electron
@@ -68,7 +68,7 @@ Control messages are JSON in **text** frames. Terminal data travels in
 
 | Direction | Message | Notes |
 |---|---|---|
-| core → UI | `{"type":"hello","version":"0.1.0-dev","protocol":5}` | Sent right after connecting |
+| core → UI | `{"type":"hello","version":"0.1.0-dev","protocol":6}` | Sent right after connecting |
 | UI → core | `{"type":"ping","id":1}` | `id` is an integer chosen by the client |
 | core → UI | `{"type":"pong","id":1}` | Echoes the `id` |
 | core → UI | `{"type":"error","id":1,"message":"…"}` | Reply to a failed request, or to an unknown `type`. `id` is echoed if the request had one, otherwise omitted. The connection stays open. |
@@ -120,6 +120,7 @@ Session: {"id":"$3","name":"h-api-1","harnessName":"","managed":true,"cwd":"/hom
 | `hosts.configHosts` | none | `[ConfigHost]`: concrete `Host` entries from `~/.ssh/config` (wildcard patterns skipped), each `{"alias","hostName","user","port","added"}`. `added` is true when a saved host already uses that alias as its target. |
 | `hosts.installHooks` | `host` | `null`. Installs the Claude status hooks on the host (§5.2) after backing up its settings file. Idempotent. The host's `claudeHooks` updates via `hosts.changed`. |
 | `hosts.removeHooks` | `host` | `null`. Removes only our hook entries and script. Idempotent. |
+| `hosts.check` | `host` | `HostReport` (§5.3). A read-only setup check of the host. It changes nothing there. |
 | `hosts.trustKey` | `host`, `fingerprint` | `null`. Adds the pending host key to `~/.ssh/known_hosts` and reconnects. `fingerprint` must match `hostKey.fingerprint`; this guards against a key changing between the prompt and the click. |
 | `sessions.list` | `host` | `[Session]` |
 | `sessions.create` | `host`, `dir` (optional, `~` allowed, default home), `name` (optional), `command` (`"shell"` default or `"claude"`) | `Session` |
@@ -169,6 +170,34 @@ up within one poll (≤ 2 s) in `sessions.changed`.
 | `""` | Claude isn't running | `SessionEnd` clears the options. Core also reports `""` whenever the active pane's command is a shell (`sh`, `bash`, `zsh`, `fish`, `dash`, `ksh`, `tcsh`), in case Claude exited without `SessionEnd`. |
 
 The hooks never affect Claude: the script always exits 0 and prints nothing.
+
+### 5.3 Host setup check
+
+`hosts.check` returns:
+
+```json
+{"host":"devbox","checkedAt":1794420500,"items":[
+  {"id":"tmux","label":"tmux","status":"ok","detail":"3.4 at /usr/bin/tmux"},
+  {"id":"claude","label":"Claude Code","status":"warn","detail":"not found on PATH",
+   "fix":"Install Claude Code on this host to run claude sessions here.",
+   "fixCommand":"curl -fsSL https://claude.ai/install.sh | bash"}]}
+```
+
+`status` is `ok`, `warn` (works, but worth fixing) or `error` (blocks using
+the host). `fix` and `fixCommand` are present only for `warn` and `error`.
+`fixCommand` is a suggestion for the user to copy; the app never runs it.
+
+Items, in this order. An item is omitted when it doesn't apply.
+
+| `id` | Checks | `error` / `warn` when |
+|---|---|---|
+| `connection` | SSH hosts only: the connection and its target | `error` if the host isn't connected; the other items are then omitted |
+| `tmux` | tmux is found (path) and its version | `error` if missing (install hint for the host's OS: `brew install tmux`, `sudo apt install tmux`, `sudo dnf install tmux`) or older than 3.2 |
+| `shell` | The user's login shell (`$SHELL`) | `warn` if unset |
+| `home` | The home directory | `error` if it can't be determined |
+| `claude` | `claude` is on the PATH of a login shell (located only, never run) | `warn` if not found |
+| `config` | The Claude Code config dir (`$CLAUDE_CONFIG_DIR` or `~/.claude`) and whether `settings.json` is valid JSON | `warn` if `settings.json` is invalid; a missing file is ok |
+| `hooks` | Claude status hooks: installed, outdated or missing | `warn` if missing or outdated, with the fix "Use Install… in the sidebar" |
 
 ### 5.1 Directory suggestions
 
