@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useCore } from './CoreContext'
-import type { Session } from './sessions'
+import { canCreateOn, type Session } from './sessions'
 
 export function NewTerminalDialog({ preferredHost }: { preferredHost?: string }): React.JSX.Element {
   const { state, dispatch, client } = useCore()
-  const usable = state.hosts.filter((h) => h.state === 'connected')
+  const usable = state.hosts.filter(canCreateOn)
   const initial =
     usable.find((h) => h.id === preferredHost)?.id ?? usable.find((h) => h.id === state.active?.host)?.id ?? usable[0]?.id ?? ''
   const [host, setHost] = useState(initial)
@@ -48,10 +48,9 @@ export function NewTerminalDialog({ preferredHost }: { preferredHost?: string })
         <label>
           Host
           <select value={host} onChange={(e) => setHost(e.target.value)}>
-            {state.hosts.map((h) => (
-              <option key={h.id} value={h.id} disabled={h.state !== 'connected'}>
+            {usable.map((h) => (
+              <option key={h.id} value={h.id}>
                 {h.name}
-                {h.state !== 'connected' ? ' (unavailable)' : ''}
               </option>
             ))}
           </select>

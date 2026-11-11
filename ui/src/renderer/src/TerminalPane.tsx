@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { useCore } from './CoreContext'
-import { sessionLabel, type Session } from './sessions'
+import { closedMessage, sessionLabel, type Session } from './sessions'
 
 function cssVar(name: string, fallback: string): string {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -26,13 +26,17 @@ interface Props {
   host: string
   sessionId: string
   session: Session | undefined
+  hostName: string
+  hostConnected: boolean
 }
 
-export function TerminalPane({ host, sessionId, session }: Props): React.JSX.Element {
+export function TerminalPane({ host, sessionId, session, hostName, hostConnected }: Props): React.JSX.Element {
   const { client, dispatch } = useCore()
   const boxRef = useRef<HTMLDivElement>(null)
   const [ended, setEnded] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Bumped by Reattach to re-run the attach effect for the same session.
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     if (!client || !boxRef.current) return
@@ -127,7 +131,7 @@ export function TerminalPane({ host, sessionId, session }: Props): React.JSX.Ele
       if (stream !== null) client.request('term.detach', { stream }).catch(() => {})
       term.dispose()
     }
-  }, [client, host, sessionId])
+  }, [client, host, sessionId, attempt])
 
   return (
     <div className="term-pane">
@@ -139,7 +143,12 @@ export function TerminalPane({ host, sessionId, session }: Props): React.JSX.Ele
         <div className="term-box" ref={boxRef} />
         {(ended !== null || error !== null) && (
           <div className="term-overlay">
-            <p>{error !== null ? `Could not attach: ${error}` : 'Session ended'}</p>
+            <p>{error !== null ? `Could not attach: ${error}` : closedMessage(ended ?? '', hostName)}</p>
+            {error === null && ended === 'connection lost' && hostConnected && (
+              <button className="btn primary" onClick={() => setAttempt((n) => n + 1)}>
+                Reattach
+              </button>
+            )}
             <button className="btn" autoFocus onClick={() => dispatch({ type: 'attach', ref: null })}>
               Close
             </button>

@@ -43,6 +43,7 @@ export function CoreProvider({ children }: { children: React.ReactNode }): React
         conn.onEvent('sessions.changed', (ev) =>
           dispatch({ type: 'sessions', host: String(ev.host), sessions: (ev.sessions ?? []) as Session[] })
         )
+        conn.onEvent('hosts.changed', (ev) => dispatch({ type: 'hosts', hosts: (ev.hosts ?? []) as Host[] }))
         setClient(conn)
       } finally {
         opening = false

@@ -1,5 +1,15 @@
 module github.com/jgulick48/claude-harness
 
-go 1.25
+go 1.25.0
 
-require github.com/coder/websocket v1.8.15
+require (
+	github.com/coder/websocket v1.8.15
+	github.com/davidmz/go-pageant v1.0.2
+	github.com/kevinburke/ssh_config v1.6.0
+	github.com/skeema/knownhosts v1.3.3
+)
+
+require (
+	golang.org/x/crypto v0.55.0
+	golang.org/x/sys v0.47.0 // indirect
+)
