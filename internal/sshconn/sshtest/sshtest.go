@@ -10,10 +10,12 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -44,19 +46,34 @@ type Server struct {
 	ln   net.Listener
 	cfg  *ssh.ServerConfig
 
-	mu     sync.Mutex
-	conns  map[net.Conn]struct{}
-	closed bool
-	wg     sync.WaitGroup
+	mu      sync.Mutex
+	conns   map[net.Conn]struct{}
+	closed  bool
+	blocked bool
+	wg      sync.WaitGroup
 }
 
 // Start starts a server; t.Cleanup stops it.
 func Start(t testing.TB, opts Options) *Server {
 	t.Helper()
+	s, err := StartServer(opts)
+	if err != nil {
+		t.Fatalf("sshtest: %v", err)
+	}
+	t.Cleanup(s.Close)
+	return s
+}
+
+// StartServer starts a server on 127.0.0.1 without needing a testing.TB. The
+// caller must call Close.
+func StartServer(opts Options) (*Server, error) {
 	if opts.Shell == "" {
 		opts.Shell = "/bin/sh"
 	}
-	hostSigner := NewKey(t)
+	hostSigner, err := GenerateKey()
+	if err != nil {
+		return nil, err
+	}
 	authorized := make([][]byte, len(opts.AuthorizedKeys))
 	for i, k := range opts.AuthorizedKeys {
 		authorized[i] = k.Marshal()
@@ -76,7 +93,7 @@ func Start(t testing.TB, opts Options) *Server {
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("sshtest: listen: %v", err)
+		return nil, fmt.Errorf("listen: %w", err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 	s := &Server{
@@ -90,8 +107,16 @@ func Start(t testing.TB, opts Options) *Server {
 	}
 	s.wg.Add(1)
 	go s.acceptLoop()
-	t.Cleanup(s.Close)
-	return s
+	return s, nil
+}
+
+// SetBlocked makes the server refuse (immediately close) new connections while
+// true, without touching existing ones. Combine with DropConnections to keep a
+// client offline.
+func (s *Server) SetBlocked(b bool) {
+	s.mu.Lock()
+	s.blocked = b
+	s.mu.Unlock()
 }
 
 func (s *Server) acceptLoop() {
@@ -106,6 +131,11 @@ func (s *Server) acceptLoop() {
 			s.mu.Unlock()
 			nc.Close()
 			return
+		}
+		if s.blocked {
+			s.mu.Unlock()
+			nc.Close()
+			continue
 		}
 		s.conns[nc] = struct{}{}
 		s.mu.Unlock()
@@ -265,7 +295,10 @@ func (s *Server) session(ch ssh.Channel, reqs <-chan *ssh.Request) {
 				continue
 			}
 			cmd = exec.Command(s.opts.Shell, "-c", p.Command)
-			cmd.Env = append(append(os.Environ(), s.opts.Env...), env...)
+			// Drop the test process's TMUX/TMUX_PANE: a real sshd wouldn't pass them,
+			// and with TMUX set a tmux command without -L/-S targets the user's
+			// own tmux server.
+			cmd.Env = append(append(withoutTmux(os.Environ()), s.opts.Env...), env...)
 			cmd.Stdout = ch
 			cmd.Stderr = ch.Stderr()
 			cmd.WaitDelay = 2 * time.Second
@@ -320,16 +353,25 @@ func (s *Server) session(ch ssh.Channel, reqs <-chan *ssh.Request) {
 	}
 }
 
-// NewKey returns a fresh ed25519 signer for tests.
-func NewKey(t testing.TB) ssh.Signer {
-	t.Helper()
+// GenerateKey returns a fresh ed25519 signer.
+func GenerateKey() (ssh.Signer, error) {
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		t.Fatalf("sshtest: generate key: %v", err)
+		return nil, fmt.Errorf("generate key: %w", err)
 	}
 	s, err := ssh.NewSignerFromKey(priv)
 	if err != nil {
-		t.Fatalf("sshtest: signer: %v", err)
+		return nil, fmt.Errorf("signer: %w", err)
+	}
+	return s, nil
+}
+
+// NewKey returns a fresh ed25519 signer for tests.
+func NewKey(t testing.TB) ssh.Signer {
+	t.Helper()
+	s, err := GenerateKey()
+	if err != nil {
+		t.Fatalf("sshtest: %v", err)
 	}
 	return s
 }
@@ -338,15 +380,27 @@ func NewKey(t testing.TB) ssh.Signer {
 // a short temp dir and returns the socket path (unix only).
 func StartAgent(t testing.TB, signers ...ssh.Signer) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "sa")
+	sock, stop, err := ServeAgent("", signers...)
 	if err != nil {
-		t.Fatalf("sshtest: tempdir: %v", err)
+		t.Fatalf("sshtest: %v", err)
 	}
-	sock := dir + "/a.sock"
+	t.Cleanup(stop)
+	return sock
+}
+
+// ServeAgent serves an in-memory ssh-agent holding signers on a unix socket in
+// a fresh short temp dir under dir ("" means the default temp dir). stop closes
+// the agent and removes the socket's directory.
+func ServeAgent(dir string, signers ...ssh.Signer) (socketPath string, stop func(), err error) {
+	d, err := os.MkdirTemp(dir, "sa")
+	if err != nil {
+		return "", nil, fmt.Errorf("tempdir: %w", err)
+	}
+	sock := d + "/a.sock"
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
-		os.RemoveAll(dir)
-		t.Fatalf("sshtest: agent listen: %v", err)
+		os.RemoveAll(d)
+		return "", nil, fmt.Errorf("agent listen: %w", err)
 	}
 	ag := &signerAgent{signers: signers}
 	var (
@@ -369,7 +423,7 @@ func StartAgent(t testing.TB, signers ...ssh.Signer) string {
 			go func() { defer wg.Done(); _ = agent.ServeAgent(ag, c); c.Close() }()
 		}
 	}()
-	t.Cleanup(func() {
+	stop = func() {
 		ln.Close()
 		mu.Lock()
 		for _, c := range conns {
@@ -377,9 +431,9 @@ func StartAgent(t testing.TB, signers ...ssh.Signer) string {
 		}
 		mu.Unlock()
 		wg.Wait()
-		os.RemoveAll(dir)
-	})
-	return sock
+		os.RemoveAll(d)
+	}
+	return sock, stop, nil
 }
 
 // signerAgent is a read-only agent.Agent over ssh.Signers. (agent.NewKeyring
@@ -413,3 +467,14 @@ func (a *signerAgent) Remove(ssh.PublicKey) error     { return errReadOnly }
 func (a *signerAgent) RemoveAll() error               { return errReadOnly }
 func (a *signerAgent) Lock([]byte) error              { return errReadOnly }
 func (a *signerAgent) Unlock([]byte) error            { return errReadOnly }
+
+func withoutTmux(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "TMUX=") || strings.HasPrefix(kv, "TMUX_PANE=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}

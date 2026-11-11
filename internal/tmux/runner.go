@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -70,6 +71,7 @@ func (r *LocalRunner) command(args []string) (string, []string) {
 func (r *LocalRunner) Output(ctx context.Context, args ...string) ([]byte, error) {
 	bin, full := r.command(args)
 	cmd := exec.CommandContext(ctx, bin, full...)
+	cmd.Env = TmuxEnv(os.Environ())
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -85,6 +87,7 @@ func (r *LocalRunner) Start(ctx context.Context, args ...string) (Proc, error) {
 	}
 	bin, full := r.command(args)
 	cmd := exec.Command(bin, full...)
+	cmd.Env = TmuxEnv(os.Environ())
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -117,4 +120,20 @@ func (p *localProc) Wait() error {
 		return &Error{Stderr: strings.TrimSpace(p.stderr.String()), Err: err}
 	}
 	return nil
+}
+
+// TmuxEnv returns env without TMUX and TMUX_PANE. When TMUX is set (the core
+// or a test was started from inside a tmux session), a tmux command without
+// -L/-S talks to *that* server instead of the one we mean, so a stray
+// kill-server could take down the user's own tmux. Every tmux we start gets
+// this environment.
+func TmuxEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "TMUX=") || strings.HasPrefix(kv, "TMUX_PANE=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
