@@ -368,7 +368,7 @@ Each milestone is its own feature branch and PR.
 | M2 | SSH to one host: list/attach existing sessions, create with dir + name, detach/reattach | Sessions survive app restart |
 | M3 | Multiple hosts, sidebar grouped by host with connection state, per-host [+], auto-reconnect, `~/.ssh/config` import, remote dir autocomplete, recent dirs | 3+ hosts visible and usable at once |
 | M4 | Claude status: hook installer, per-host monitor client, Working/Waiting/Idle in the sidebar, notifications, "needs attention first" sort | Each session's Claude status is visible in the sidebar |
-| M5 | Host setup check (tmux version, hooks), packaging, signed installers, auto-update | One-click install on all 3 OSes |
+| M5 | Host setup check (tmux version, hooks), signed installers (packaging and auto-update were pulled forward: GitHub Releases + `electron-updater` on Windows/Linux; macOS auto-install pending signing, until then macOS updates are manual downloads) | One-click install on all 3 OSes |
 | M6 | Sidebar filter and keyboard navigation, collapsed rail, splits across hosts, saved layouts, themes | — |
 
 ## 11. Risks and open questions

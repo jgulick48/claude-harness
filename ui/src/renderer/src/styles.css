@@ -267,4 +267,36 @@ body {
   gap: 8px;
   background: rgba(0, 0, 0, 0.55);
   color: #fff;
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.update-banner.muted {
+  color: var(--fg-muted);
+}
+
+.update-banner.error {
+  color: var(--error);
+}
+
+.update-button {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.update-button:hover {
+  border-color: var(--fg-muted);
 }

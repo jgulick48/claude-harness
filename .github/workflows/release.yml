@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    name: verify tag matches ui/package.json
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare tag and package version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          pkg_version="$(node -p "require('./ui/package.json').version")"
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "Tag $GITHUB_REF_NAME ($tag_version) does not match ui/package.json version ($pkg_version)"
+            exit 1
+          fi
+
+      # Create the draft once, up front: the three build jobs upload to it in
+      # parallel, and electron-builder would otherwise race to create
+      # duplicate drafts for the same tag.
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+              --title "$GITHUB_REF_NAME" --generate-notes
+          fi
+
+  build:
+    name: build (${{ matrix.os }})
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build harness-core
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          LDFLAGS="-X github.com/jgulick48/claude-harness/internal/version.Version=${VERSION}"
+          mkdir -p bin
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            go build -ldflags "$LDFLAGS" -o bin/harness-core.exe ./cmd/harness-core
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            # Universal binary so both the arm64 and x64 app builds get a working core.
+            GOARCH=arm64 go build -ldflags "$LDFLAGS" -o bin/harness-core-arm64 ./cmd/harness-core
+            GOARCH=amd64 go build -ldflags "$LDFLAGS" -o bin/harness-core-amd64 ./cmd/harness-core
+            lipo -create -output bin/harness-core bin/harness-core-arm64 bin/harness-core-amd64
+            rm bin/harness-core-arm64 bin/harness-core-amd64
+          else
+            go build -ldflags "$LDFLAGS" -o bin/harness-core ./cmd/harness-core
+          fi
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install UI dependencies
+        working-directory: ui
+        run: npm ci
+
+      - name: Build and publish to draft release
+        working-directory: ui
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run release
+
+  publish:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"

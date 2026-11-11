@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useCore } from './CoreContext'
+import { UpdateBanner } from './UpdateBanner'
 import { displayPath, sessionLabel, sortSessions, truncateMiddle, type Host, type Session } from './sessions'
 
 interface MenuState {
@@ -216,6 +217,7 @@ export function Sidebar(): React.JSX.Element {
         })}
       </div>
       {actionError && <div className="action-error">{actionError}</div>}
+      <UpdateBanner />
       <footer className={statusIsError ? 'status-line error' : 'status-line'}>{status}</footer>
       {menu && (
         <ContextMenu
