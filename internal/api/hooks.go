@@ -25,5 +25,10 @@ func (cn *conn) handleHooks(ctx context.Context, method string, p *params) (any,
 	if err != nil {
 		return nil, err
 	}
+	// Host.ClaudeHooks changed. SSH hosts announce it through their wrapper,
+	// but the local host has none, so ask the manager to re-send the hosts.
+	if n, ok := cn.s.hm.(session.HostsNotifier); ok {
+		n.NotifyHostsChanged()
+	}
 	return nil, nil
 }

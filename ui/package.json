@@ -1,6 +1,6 @@
 {
   "name": "claude-harness",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "Multi-host tmux desktop app for Claude Code sessions",
   "main": "./out/main/index.js",
@@ -8,11 +8,14 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.e2e.json",
     "test": "vitest run",
     "package": "electron-vite build && electron-builder --dir --publish never",
     "dist": "electron-vite build && electron-builder --publish never",
-    "release": "electron-vite build && electron-builder --publish always"
+    "release": "electron-vite build && electron-builder --publish always",
+    "test:e2e": "npm run test:e2e:renderer && npm run test:e2e:electron",
+    "test:e2e:renderer": "playwright test -c e2e/playwright.config.ts --project renderer --project renderer-dark",
+    "test:e2e:electron": "playwright test -c e2e/playwright.config.ts --project electron"
   },
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",
@@ -23,6 +26,7 @@
     "react-dom": "19.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@types/node": "26.6.5",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",

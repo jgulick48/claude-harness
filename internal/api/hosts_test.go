@@ -162,7 +162,7 @@ func TestHostMethods(t *testing.T) {
 
 // connect2 dials and consumes hello, the initial hosts.changed and one
 // sessions.changed per backend.
-func connect2(t *testing.T, hm *fakeHM) (*websocket.Conn, context.Context) {
+func connect2(t *testing.T, hm session.HostManager) (*websocket.Conn, context.Context) {
 	t.Helper()
 	c, ctx := dial(t, newHMTS(t, hm))
 	if m := readMsg(t, ctx, c); m["type"] != "hello" {

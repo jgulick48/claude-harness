@@ -234,3 +234,10 @@ type HookInstaller interface {
 	InstallHooks(ctx context.Context) error
 	RemoveHooks(ctx context.Context) error
 }
+
+// HostsNotifier is an optional HostManager capability: re-send the host list
+// to subscribers now. Used after a change the manager can't observe itself,
+// such as installing hooks on the local host (which has no SSH wrapper).
+type HostsNotifier interface {
+	NotifyHostsChanged()
+}

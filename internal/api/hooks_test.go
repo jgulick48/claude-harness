@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jgulick48/claude-harness/internal/session"
@@ -96,5 +97,43 @@ func TestSessionsChangedCarriesClaudeStatus(t *testing.T) {
 	s := m["sessions"].([]any)[0].(map[string]any)
 	if s["claudeStatus"] != "waiting" || s["claudeStatusAt"] != float64(1794420400) {
 		t.Fatalf("%v", s)
+	}
+}
+
+// notifyHM is a fakeHM that also implements session.HostsNotifier.
+type notifyHM struct {
+	*fakeHM
+	mu       sync.Mutex
+	notified int
+}
+
+func (n *notifyHM) NotifyHostsChanged() {
+	n.mu.Lock()
+	n.notified++
+	n.mu.Unlock()
+}
+
+// Installing hooks on the local host (no SSH wrapper to announce it) must make
+// the manager re-send hosts, or the UI keeps showing "hooks aren't installed".
+func TestHooksNotifyHostsChanged(t *testing.T) {
+	hb := &hookBackend{fakeBackend: newFakeBackend(), removeErr: fmt.Errorf("%w: y", session.ErrNotFound)}
+	hm := &notifyHM{fakeHM: &fakeHM{subs: map[int]func([]session.Host){}, backends: []session.Backend{hb}}}
+	c, ctx := connect2(t, hm)
+	run := func(req string) map[string]any { return rpc(t, ctx, c, req) }
+	if r := run(`{"type":"hosts.installHooks","id":1,"host":"local"}`); r["type"] != "result" {
+		t.Fatal(r)
+	}
+	hm.mu.Lock()
+	n := hm.notified
+	hm.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("NotifyHostsChanged called %d times after install, want 1", n)
+	}
+	wantErr(t, run(`{"type":"hosts.removeHooks","id":2,"host":"local"}`), "not_found")
+	hm.mu.Lock()
+	n = hm.notified
+	hm.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("NotifyHostsChanged called after a failed remove (%d)", n)
 	}
 }

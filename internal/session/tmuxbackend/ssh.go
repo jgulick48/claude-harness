@@ -69,6 +69,7 @@ func NewSSH(ctx context.Context, id, name string, c *sshconn.Client, opts Option
 	b.ops = ops
 	b.noTmux = noTmux
 	b.lostCh = make(chan struct{})
+	b.connDone = c.Done()
 	go func() {
 		<-c.Done()
 		close(b.lostCh)

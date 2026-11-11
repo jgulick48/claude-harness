@@ -44,6 +44,21 @@ The core uses the local tmux server by default. For development and tests you ca
 
 The test suites always use a private socket and `/dev/null` config, so they never touch your real tmux sessions.
 
+### Browser end-to-end tests
+
+Playwright drives the real UI against a real core and a private tmux server. There are two suites:
+
+```sh
+cd ui
+npx playwright install chromium        # once
+npm run test:e2e:renderer              # the renderer in headless Chromium (light and dark)
+xvfb-run -a npm run test:e2e:electron  # the real Electron app (omit xvfb-run on macOS)
+```
+
+The suites need tmux, so they don't run on Windows. Screenshots go to `ui/e2e/screenshots/`, which is gitignored.
+
+Every test core runs isolated: a private tmux socket, and a temporary `HOME`, `CLAUDE_CONFIG_DIR`, hosts file and state file. The tests drop `$TMUX` and refuse to run tmux without an explicit `-L` or `-S`. If you run them from inside tmux, it's still worth pointing `TMUX` at a throwaway server, for example `tmux -S /tmp/decoy new -d` and then `TMUX=/tmp/decoy,<pid>,0 npm run test:e2e:renderer`. That way, a future mistake can't reach your own session.
+
 ## SSH hosts
 
 Click the server icon in the sidebar header and enter an `~/.ssh/config` alias or `user@host[:port]`. The app uses your existing SSH setup:
@@ -57,7 +72,12 @@ Saved hosts live in `hosts.json` in the app's config directory (`~/.config/claud
 
 ## Releases & updates
 
-To cut a release: bump `version` in `ui/package.json`, commit, tag `vX.Y.Z` (matching that version) and push the tag. The Release workflow builds installers for macOS (dmg/zip, arm64 + x64), Windows (NSIS) and Linux (AppImage) and publishes them to GitHub Releases.
+To cut a release:
+
+1. In the feature or fix PR itself, bump the version with `cd ui && npm version X.Y.Z --no-git-tag-version`, which updates `package.json` and `package-lock.json`. `main` is protected, so there's no separate version-bump PR. Use a minor bump for features and a patch bump for fixes.
+2. After the PR merges, tag the merge commit `vX.Y.Z` (it must match `ui/package.json`) and push the tag.
+
+The Release workflow builds installers for macOS (dmg/zip, arm64 + x64), Windows (NSIS) and Linux (AppImage) and publishes them to GitHub Releases.
 
 Installed apps check for updates shortly after startup and every 4 hours (also via **Check for Updates…**). Windows and Linux (AppImage) download updates in the background and offer **Restart to install** (otherwise the update installs on next quit). Set `HARNESS_DISABLE_UPDATES=1` to turn update checks off.
 

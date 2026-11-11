@@ -97,6 +97,48 @@ jobs:
         working-directory: ui
         run: npm test
 
+      # Browser end-to-end tests (Linux and macOS; Windows has no tmux).
+      - name: Install Playwright Chromium (Linux)
+        if: runner.os == 'Linux'
+        working-directory: ui
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright Chromium (macOS)
+        if: runner.os == 'macOS'
+        working-directory: ui
+        run: npx playwright install chromium
+
+      - name: Build sshtestd (e2e SSH host)
+        if: runner.os != 'Windows'
+        run: go build -o bin/sshtestd ./internal/sshconn/sshtest/cmd/sshtestd
+
+      - name: E2E renderer tests
+        if: runner.os != 'Windows'
+        working-directory: ui
+        run: npm run test:e2e:renderer
+
+      - name: E2E electron tests (Linux, under Xvfb)
+        if: runner.os == 'Linux'
+        working-directory: ui
+        run: xvfb-run -a npm run test:e2e:electron
+
+      - name: E2E electron tests (macOS)
+        if: runner.os == 'macOS'
+        working-directory: ui
+        run: npm run test:e2e:electron
+
+      - name: Upload e2e screenshots and report
+        if: always() && runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ matrix.os }}
+          path: |
+            ui/e2e/screenshots
+            ui/e2e/playwright-report
+            ui/e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Package UI (unsigned)
         working-directory: ui
         env:
