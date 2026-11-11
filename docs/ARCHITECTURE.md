@@ -91,8 +91,16 @@ Responsibilities:
 - **SSH transport** using `golang.org/x/crypto/ssh`:
   - Parse `~/.ssh/config` (e.g. `kevinburke/ssh_config`): `HostName`, `User`,
     `Port`, `IdentityFile`, `ProxyJump`.
-  - Authenticate via ssh-agent (Unix socket; Windows OpenSSH agent named pipe;
-    Pageant) and identity files.
+  - Authenticate through an SSH agent, which holds and loads the keys:
+    - **macOS / Linux:** the agent at `SSH_AUTH_SOCK`, with identity files from
+      `~/.ssh/config` as a fallback.
+    - **Windows:** **Pageant** (PuTTY's agent). Pageant loads and unlocks the
+      keys; the app never reads private key files on Windows. Core talks to
+      Pageant through `golang.org/x/crypto/ssh/agent`. It uses Pageant's
+      OpenSSH-compatible named pipe (Pageant 0.75+) if available, or its
+      window-message interface otherwise (e.g. via `github.com/davidmz/go-pageant`).
+      If Pageant isn't running or has no keys loaded, the UI shows a clear
+      message explaining how to start it and add keys.
   - Verify host keys against `~/.ssh/known_hosts`; prompt the UI on unknown keys.
   - One SSH connection per host; multiple channels multiplexed over it.
 - **tmux control-mode client** per host:
@@ -361,5 +369,8 @@ Each milestone is its own feature branch and PR.
   Validate early with Claude Code's full-screen UI in M1.
 - **tmux version spread** across hosts. Mitigation: version check with a clear
   error below 3.2.
-- **Windows ssh-agent variants** (OpenSSH named pipe vs. Pageant). Test in M3.
+- **Windows key handling: decided.** Pageant is the agent on Windows and
+  handles loading keys (§3.1). Remaining work for M3: test both Pageant
+  transports (named pipe and window messages) and the "Pageant not running"
+  path.
 - **Code signing/notarization** costs and setup for macOS and Windows (M5).
