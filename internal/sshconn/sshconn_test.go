@@ -121,6 +121,7 @@ func writeKey(t *testing.T, path string, pass string) ssh.Signer {
 func TestResolve(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir) // os.UserHomeDir on Windows
 	cfg := filepath.Join(dir, "config")
 	os.WriteFile(cfg, []byte(`
 Host web

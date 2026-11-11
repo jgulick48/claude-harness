@@ -198,7 +198,8 @@ func resolveWith(cfg *ssh_config.Config, target string) (Resolved, error) {
 	for _, id := range ids {
 		id = strings.Trim(strings.TrimSpace(id), `"`)
 		if id != "" && !strings.EqualFold(id, "none") {
-			r.IdentityFiles = append(r.IdentityFiles, expandTokens(id, r.HostName, r.User))
+			// IdentityFile is a local path: normalize separators for this OS.
+			r.IdentityFiles = append(r.IdentityFiles, filepath.Clean(expandTokens(id, r.HostName, r.User)))
 		}
 	}
 

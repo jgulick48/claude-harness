@@ -50,7 +50,7 @@ func gatherAuth(r Resolved, opts Options, log *slog.Logger) *authState {
 	var files []string
 	files = append(files, r.IdentityFiles...)
 	for _, f := range opts.IdentityFiles {
-		files = append(files, expandTokens(f, r.HostName, r.User))
+		files = append(files, filepath.Clean(expandTokens(f, r.HostName, r.User)))
 	}
 	if h := homeDir(); h != "" {
 		for _, n := range []string{"id_ed25519", "id_ecdsa", "id_rsa"} {

@@ -73,14 +73,16 @@ describe.skipIf(!exists)('harness-core integration', () => {
       const hello = await next()
       expect(hello).toMatchObject({ type: 'hello', protocol: 3, version: core.info.version })
       ws.send(JSON.stringify({ type: 'ping', id: 7 }))
-      // Events (the initial hosts.changed and sessions.changed) may arrive first.
+      // The pong and the initial events (hosts.changed, sessions.changed) are
+      // sent from different goroutines, so they can arrive in either order.
       const events: any[] = []
-      let reply = await next()
-      while (reply.type === 'event') {
-        events.push(reply)
-        reply = await next()
+      let pong: any
+      while (!pong || !events.some((e) => e.event === 'hosts.changed')) {
+        const m = await next()
+        if (m.type === 'event') events.push(m)
+        else pong = m
       }
-      expect(reply).toEqual({ type: 'pong', id: 7 })
+      expect(pong).toEqual({ type: 'pong', id: 7 })
       const hc = events.find((e) => e.event === 'hosts.changed')
       expect(hc?.hosts?.[0]).toMatchObject({ id: 'local', kind: 'local' })
       ws.close()

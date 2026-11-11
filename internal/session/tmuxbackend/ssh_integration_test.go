@@ -135,7 +135,9 @@ func TestSSHHostAndLocate(t *testing.T) {
 }
 
 func TestSSHLocateProbePaths(t *testing.T) {
-	r := newSSHRig(t, "PATH=/nonexistent")
+	// Bogus SHELL too: on macOS a login shell rebuilds PATH (path_helper),
+	// so "$SHELL -lc" would still find Homebrew tmux. Later env entries win.
+	r := newSSHRig(t, "PATH=/nonexistent", "SHELL=/nonexistent/sh")
 	real, err := exec.LookPath("tmux")
 	if err != nil {
 		t.Skip(err)
@@ -153,7 +155,9 @@ func TestSSHLocateProbePaths(t *testing.T) {
 }
 
 func TestSSHTmuxNotFound(t *testing.T) {
-	r := newSSHRig(t, "PATH=/nonexistent")
+	// Bogus SHELL too: on macOS a login shell rebuilds PATH (path_helper),
+	// so "$SHELL -lc" would still find Homebrew tmux. Later env entries win.
+	r := newSSHRig(t, "PATH=/nonexistent", "SHELL=/nonexistent/sh")
 	old := tmuxProbePaths
 	tmuxProbePaths = []string{"/nonexistent/tmux"}
 	t.Cleanup(func() { tmuxProbePaths = old })
