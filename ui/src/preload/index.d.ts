@@ -31,6 +31,10 @@ export interface HarnessApi {
   checkForUpdates(): Promise<void>
   installUpdate(): Promise<void>
   downloadUpdate(): Promise<void>
+  /** Number of sessions waiting on the user; main sets the dock/launcher badge. */
+  setAttentionCount(n: number): void
+  /** Show and focus the app window (e.g. from a notification click). */
+  focusWindow(): void
 }
 
 declare global {

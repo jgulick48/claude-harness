@@ -151,6 +151,19 @@ async function launchCore(): Promise<void> {
   }
 }
 
+// Badge count (macOS dock, Linux Unity); a no-op elsewhere.
+ipcMain.on('attention:count', (_e, n: unknown) => {
+  const count = typeof n === 'number' && Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0
+  app.setBadgeCount(count)
+})
+
+ipcMain.on('window:focus', () => {
+  if (!mainWindow) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+})
+
 ipcMain.handle('core:info', () => coreInfo ?? { error: 'core is not started yet' })
 
 app.whenReady().then(() => {

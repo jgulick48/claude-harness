@@ -83,4 +83,21 @@ describe('store reducer', () => {
     st = reducer(st, { type: 'closeAddHost' })
     expect(st.addHostOpen).toBe(false)
   })
+  describe('claude status fields', () => {
+    it('keeps claudeStatus through replace and upsert', () => {
+      const w = { ...s('$1'), claudeStatus: 'waiting' as const, claudeStatusAt: 5 }
+      let st = reducer(initialState, { type: 'sessions', host: 'local', sessions: [w] })
+      expect(st.sessions.local[0]).toMatchObject({ claudeStatus: 'waiting', claudeStatusAt: 5 })
+      st = reducer(st, { type: 'upsertSession', host: 'local', session: { ...w, claudeStatus: 'idle' } })
+      expect(st.sessions.local[0].claudeStatus).toBe('idle')
+    })
+    it('keeps claudeHooks on hosts and drops sessions of removed hosts', () => {
+      const h: Host = { id: 'a', name: 'a', kind: 'ssh', state: 'connected', claudeHooks: 'missing' }
+      let st = reducer(initialState, { type: 'hosts', hosts: [h] })
+      expect(st.hosts[0].claudeHooks).toBe('missing')
+      st = reducer(st, { type: 'sessions', host: 'a', sessions: [s('$1')] })
+      st = reducer(st, { type: 'hosts', hosts: [] })
+      expect(st.sessions).toEqual({})
+    })
+  })
 })

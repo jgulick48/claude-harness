@@ -20,5 +20,7 @@ contextBridge.exposeInMainWorld('harness', {
   },
   checkForUpdates: (): Promise<void> => ipcRenderer.invoke('update:check'),
   installUpdate: (): Promise<void> => ipcRenderer.invoke('update:install'),
-  downloadUpdate: (): Promise<void> => ipcRenderer.invoke('update:download')
+  downloadUpdate: (): Promise<void> => ipcRenderer.invoke('update:download'),
+  setAttentionCount: (n: number): void => ipcRenderer.send('attention:count', n),
+  focusWindow: (): void => ipcRenderer.send('window:focus')
 })

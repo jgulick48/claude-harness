@@ -26,7 +26,12 @@ export interface Host {
   retryAt?: number
   home?: string
   tmuxVersion?: string
+  /** Whether the Claude status hooks are installed; absent until checked. */
+  claudeHooks?: ClaudeHooks
 }
+
+export type ClaudeHooks = 'installed' | 'outdated' | 'missing' | 'unknown'
+export type ClaudeStatus = 'working' | 'waiting' | 'idle' | 'unknown' | ''
 
 /** One-line status for a host header; empty when connected. */
 export function hostStatusText(h: Pick<Host, 'state' | 'error'>): string {
@@ -119,6 +124,10 @@ export interface Session {
   windows: number
   attached: number
   created: number
+  /** Protocol v5; absent or "" when Claude isn't running. */
+  claudeStatus?: ClaudeStatus
+  /** Unix seconds of the last status change. */
+  claudeStatusAt?: number
 }
 
 function basename(p: string): string {

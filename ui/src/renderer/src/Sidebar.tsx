@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useCore } from './CoreContext'
 import { UpdateBanner } from './UpdateBanner'
+import { HooksDialog, type HooksMode } from './HooksDialog'
+import { StatusBadge } from './StatusBadge'
+import { canRemoveHooks, hooksNotice, orderSessions, waitingCount } from './claudeStatus'
+import { ATTENTION_SORT_KEY, loadFlag, NOTIFICATIONS_KEY, saveFlag } from './prefs'
 import { loadCollapsed, saveCollapsed, toggleCollapsed } from './collapse'
 import {
   canCreateOn,
@@ -9,7 +13,6 @@ import {
   hostStatusText,
   reconnectText,
   sessionLabel,
-  sortSessions,
   trustKeyParams,
   truncateMiddle,
   type Host,
@@ -57,12 +60,14 @@ function HostMenu({
   onChange,
   onReconnect,
   onRemove,
+  onRemoveHooks,
   onClose
 }: {
   menu: HostMenuState
   onChange: (m: HostMenuState) => void
   onReconnect: () => void
   onRemove: () => void
+  onRemoveHooks: () => void
   onClose: () => void
 }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
@@ -83,22 +88,31 @@ function HostMenu({
         </>
       ) : (
         <>
-          <button
-            className="ctx-item"
-            role="menuitem"
-            autoFocus
-            disabled={!canReconnect(menu.host)}
-            onClick={onReconnect}
-          >
-            Reconnect
-          </button>
-          <button
-            className="ctx-item danger"
-            role="menuitem"
-            onClick={() => onChange({ ...menu, confirmRemove: true })}
-          >
-            Remove host…
-          </button>
+          {menu.host.kind === 'ssh' && (
+            <button
+              className="ctx-item"
+              role="menuitem"
+              autoFocus
+              disabled={!canReconnect(menu.host)}
+              onClick={onReconnect}
+            >
+              Reconnect
+            </button>
+          )}
+          {canRemoveHooks(menu.host) && (
+            <button className="ctx-item" role="menuitem" autoFocus={menu.host.kind !== 'ssh'} onClick={onRemoveHooks}>
+              Remove Claude status hooks…
+            </button>
+          )}
+          {menu.host.kind === 'ssh' && (
+            <button
+              className="ctx-item danger"
+              role="menuitem"
+              onClick={() => onChange({ ...menu, confirmRemove: true })}
+            >
+              Remove host…
+            </button>
+          )}
         </>
       )}
     </div>
@@ -134,6 +148,30 @@ function TrustPanel({
           Cancel
         </button>
       </div>
+    </div>
+  )
+}
+
+function SettingsMenu({
+  x,
+  y,
+  notify,
+  onToggleNotify,
+  onClose
+}: {
+  x: number
+  y: number
+  notify: boolean
+  onToggleNotify: () => void
+  onClose: () => void
+}): React.JSX.Element {
+  const ref = useRef<HTMLDivElement>(null)
+  useDismiss(ref, onClose)
+  return (
+    <div className="ctx-menu" ref={ref} style={{ left: x, top: y }} role="menu">
+      <button className="ctx-item" role="menuitemcheckbox" aria-checked={notify} autoFocus onClick={onToggleNotify}>
+        {notify ? '✓ ' : ''}Notifications
+      </button>
     </div>
   )
 }
@@ -235,6 +273,12 @@ export function Sidebar(): React.JSX.Element {
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [counting])
+  const [attentionSort, setAttentionSort] = useState(() => loadFlag(ATTENTION_SORT_KEY, false))
+  const [notify, setNotify] = useState(() => loadFlag(NOTIFICATIONS_KEY, true))
+  const [settings, setSettings] = useState<{ x: number; y: number } | null>(null)
+  const [hooksDialog, setHooksDialog] = useState<{ host: Host; mode: HooksMode } | null>(null)
+  // Hosts whose hooks notice the user dismissed with "Not now" (this run only).
+  const [hooksDismissed, setHooksDismissed] = useState<Set<string>>(new Set())
   const [actionError, setActionError] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -260,6 +304,31 @@ export function Sidebar(): React.JSX.Element {
       <header className="sidebar-header">
         <span className="sidebar-title">SESSIONS</span>
         <span className="header-actions">
+        <button
+          className="icon-button"
+          aria-pressed={attentionSort}
+          title="Needs attention first"
+          aria-label="Needs attention first"
+          onClick={() =>
+            setAttentionSort((v) => {
+              saveFlag(ATTENTION_SORT_KEY, !v)
+              return !v
+            })
+          }
+        >
+          ◉
+        </button>
+        <button
+          className="icon-button"
+          title="Settings"
+          aria-label="Settings"
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect()
+            setSettings({ x: Math.max(4, r.right - 200), y: r.bottom + 2 })
+          }}
+        >
+          ⋯
+        </button>
         <button
           className="icon-button"
           disabled={!connected}
@@ -288,12 +357,15 @@ export function Sidebar(): React.JSX.Element {
       <div className="sidebar-body" ref={listRef} onKeyDown={onListKey}>
         {state.hosts.length === 0 && <p className="muted">{connected ? 'No hosts' : 'Waiting for core…'}</p>}
         {state.hosts.map((host) => {
-          const sessions = sortSessions(state.sessions[host.id] ?? [])
+          const sessions = orderSessions(state.sessions[host.id] ?? [], attentionSort)
+          const waiting = waitingCount(sessions)
+          const notice = hooksNotice(host)
           const ok = host.state === 'connected'
           const retrying = host.state === 'disconnected' && host.retryAt !== undefined
           const statusText = retrying ? reconnectText(host.retryAt!, now) : hostStatusText(host)
           const isFolded = folded.has(host.id)
           const isSsh = host.kind === 'ssh'
+          const hasMenu = isSsh || canRemoveHooks(host)
           // A changed key re-opens the panel: collapse is per host and fingerprint.
           const trustId = `${host.id}|${host.hostKey?.fingerprint ?? ''}`
           const openHostMenu = (x: number, y: number): void => {
@@ -305,7 +377,7 @@ export function Sidebar(): React.JSX.Element {
               <div
                 className="host-header"
                 onContextMenu={(e) => {
-                  if (!isSsh) return
+                  if (!hasMenu) return
                   e.preventDefault()
                   openHostMenu(e.clientX, e.clientY)
                 }}
@@ -328,8 +400,13 @@ export function Sidebar(): React.JSX.Element {
                 <span className="host-name" title={host.target} onClick={() => toggleFold(host.id)}>
                   {host.name}
                 </span>
+                {isFolded && waiting > 0 && (
+                  <span className="waiting-badge" title={`${waiting} waiting`} aria-label={`${waiting} waiting`}>
+                    {waiting}
+                  </span>
+                )}
                 <span className="host-count">{ok ? sessions.length : ''}</span>
-                {isSsh && (
+                {hasMenu && (
                   <button
                     className="icon-button small"
                     title={`Host actions for ${host.name}`}
@@ -352,6 +429,21 @@ export function Sidebar(): React.JSX.Element {
                   +
                 </button>
               </div>
+              {ok && notice && !hooksDismissed.has(host.id) && (
+                <div className="hooks-notice" role="status">
+                  <span>
+                    {notice === 'install'
+                      ? "Claude status hooks aren't installed"
+                      : 'Claude status hooks are out of date'}
+                  </span>
+                  <button className="btn small" onClick={() => setHooksDialog({ host, mode: notice })}>
+                    {notice === 'install' ? 'Install…' : 'Update…'}
+                  </button>
+                  <button className="link-button" onClick={() => setHooksDismissed((d) => new Set(d).add(host.id))}>
+                    Not now
+                  </button>
+                </div>
+              )}
               {host.state === 'connecting' && (
                 <p className="host-status connecting" role="status">
                   <span className="spinner" aria-hidden="true" />
@@ -438,6 +530,7 @@ export function Sidebar(): React.JSX.Element {
                           <span className="row-label">{sessionLabel(s)}</span>
                         )}
                         {!s.managed && <span className="tag">external</span>}
+                        <StatusBadge session={s} />
                       </div>
                       <div className="row-path" title={s.cwd}>
                         {truncateMiddle(path, 36)}
@@ -462,12 +555,36 @@ export function Sidebar(): React.JSX.Element {
             setHostMenu(null)
             if (client) act(client.request('hosts.connect', { host: h.id }))
           }}
+          onRemoveHooks={() => {
+            const h = hostMenu.host
+            setHostMenu(null)
+            setHooksDialog({ host: h, mode: 'remove' })
+          }}
           onRemove={() => {
             const h = hostMenu.host
             setHostMenu(null)
             if (client) act(client.request('hosts.remove', { host: h.id }))
           }}
         />
+      )}
+      {settings && (
+        <SettingsMenu
+          x={settings.x}
+          y={settings.y}
+          notify={notify}
+          onToggleNotify={() => {
+            const v = !notify
+            saveFlag(NOTIFICATIONS_KEY, v)
+            setNotify(v)
+            setSettings(null)
+            if (v && typeof Notification !== 'undefined' && Notification.permission === 'default')
+              void Notification.requestPermission()
+          }}
+          onClose={() => setSettings(null)}
+        />
+      )}
+      {hooksDialog && (
+        <HooksDialog host={hooksDialog.host} mode={hooksDialog.mode} onClose={() => setHooksDialog(null)} />
       )}
       {menu && (
         <ContextMenu

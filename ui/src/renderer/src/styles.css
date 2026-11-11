@@ -391,3 +391,24 @@ body {
 .combo-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge { flex: none; padding: 0 5px; font-size: 10px; color: var(--fg-muted); border: 1px solid var(--border); border-radius: 3px; font-family: inherit; }
 .combo-note { font-size: 11px; color: var(--fg-muted); }
+
+/* Claude status */
+.status { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--fg-muted); }
+.status-icon { display: inline-block; width: 1.1em; text-align: center; font-size: 13px; }
+.status-working .status-icon { animation: status-spin 2.4s linear infinite; }
+.status-waiting { color: var(--accent); font-weight: 600; }
+.status-idle { color: var(--ok); }
+@keyframes status-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .status-working .status-icon { animation: none; }
+}
+.term-titleline { display: flex; align-items: baseline; gap: 10px; }
+.waiting-badge {
+  flex: none; min-width: 16px; padding: 0 5px; border-radius: 8px; text-align: center;
+  font-size: 11px; font-weight: 600; color: #fff; background: var(--accent);
+}
+.icon-button[aria-pressed='true'] { background: var(--hover); color: var(--accent); }
+.hooks-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 2px 0 2px 14px; font-size: 12px; color: var(--fg-muted); }
+.hooks-notice .btn { padding: 1px 8px; font-size: 12px; }
+.modal .hooks-list { margin: 0; padding-left: 18px; font-size: 13px; }
+.modal .hooks-list code { font-size: 12px; overflow-wrap: anywhere; }

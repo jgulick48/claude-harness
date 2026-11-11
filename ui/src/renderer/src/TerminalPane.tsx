@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { useCore } from './CoreContext'
+import { StatusBadge } from './StatusBadge'
 import { autoReattachAction, closedMessage, sessionLabel, type Session } from './sessions'
 
 function cssVar(name: string, fallback: string): string {
@@ -172,7 +173,10 @@ export function TerminalPane({ host, sessionId, session, hostName, hostConnected
   return (
     <div className="term-pane">
       <header className="term-header">
-        <span className="term-title">{session ? sessionLabel(session) : sessionId}</span>
+        <span className="term-titleline">
+          <span className="term-title">{session ? sessionLabel(session) : sessionId}</span>
+          {session && <StatusBadge session={session} />}
+        </span>
         {session && <span className="term-path">{session.cwd}</span>}
       </header>
       <div className="term-body">
