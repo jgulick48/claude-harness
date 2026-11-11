@@ -361,9 +361,19 @@ func TestAttachDropsOutputBeforeSeed(t *testing.T) {
 	s := mustCreate(t, b, session.CreateOptions{Dir: t.TempDir()})
 	tm(t, b, "send-keys", "-t", s.ID, "-l", "echo before-attach")
 	tm(t, b, "send-keys", "-t", s.ID, "Enter")
-	waitFor(t, func() bool {
-		return strings.Count(tm(t, b, "capture-pane", "-p", "-t", s.ID), "before-attach") >= 2
-	})
+	var pane string
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		pane = tm(t, b, "capture-pane", "-p", "-t", s.ID)
+		if strings.Count(pane, "before-attach") >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("command output never appeared; pane: %q; cmd=%q", pane,
+				tm(t, b, "display", "-p", "-t", s.ID, "#{pane_current_command} #{cursor_x},#{cursor_y}"))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	term := attach(t, b, s, 80, 24)
 	seed := string(<-term.Output())
 	if !strings.Contains(seed, "before-attach") {
