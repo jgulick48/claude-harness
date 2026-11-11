@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { generateToken, parseReadyLine, resolveCorePath } from './core'
 
@@ -14,10 +15,10 @@ describe('resolveCorePath', () => {
     expect(resolveCorePath({ ...base, env: { HARNESS_CORE_PATH: '/x/core' }, isPackaged: true })).toBe('/x/core')
   })
   it('uses resources/bin when packaged', () => {
-    expect(resolveCorePath({ ...base, isPackaged: true })).toBe('/res/bin/harness-core')
+    expect(resolveCorePath({ ...base, isPackaged: true })).toBe(join('/res', 'bin', 'harness-core'))
   })
   it('uses repo-root bin in dev', () => {
-    expect(resolveCorePath(base)).toBe('/repo/bin/harness-core')
+    expect(resolveCorePath(base)).toBe(join('/repo', 'bin', 'harness-core'))
   })
   it('adds .exe on win32', () => {
     expect(resolveCorePath({ ...base, platform: 'win32', isPackaged: true })).toMatch(/harness-core\.exe$/)
