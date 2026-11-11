@@ -15,7 +15,10 @@ export const bridgeKeys: Record<keyof HarnessApi, true> = {
   installUpdate: true,
   downloadUpdate: true,
   setAttentionCount: true,
-  focusWindow: true
+  focusWindow: true,
+  readClipboard: true,
+  writeClipboard: true,
+  showTerminalMenu: true
 }
 
 export interface E2EHooks {
@@ -27,6 +30,8 @@ export interface E2EHooks {
   attention: number
   /** How many times focusWindow was called (e.g. a notification click). */
   focused: number
+  /** In-memory stand-in for the system clipboard. */
+  clipboard: string
 }
 
 declare global {
@@ -40,7 +45,7 @@ declare global {
  * `HarnessApi` annotation makes the compiler reject a missing or extra member.
  */
 export function installFakeBridge(info: CoreInfo): void {
-  const hooks: E2EHooks = { resume: null, resizes: 0, attention: -1, focused: 0 }
+  const hooks: E2EHooks = { resume: null, resizes: 0, attention: -1, focused: 0, clipboard: '' }
   window.__e2e = hooks
   // Count term.resize requests (JSON text frames), e.g. to catch refit loops.
   const send = WebSocket.prototype.send
@@ -72,7 +77,12 @@ export function installFakeBridge(info: CoreInfo): void {
     },
     focusWindow: () => {
       hooks.focused++
-    }
+    },
+    readClipboard: async () => hooks.clipboard,
+    writeClipboard: async (text) => {
+      hooks.clipboard = text
+    },
+    showTerminalMenu: async () => null
   }
   window.harness = api
 }

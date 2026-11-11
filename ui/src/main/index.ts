@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, powerMonitor, shell, type MenuItemConstructorOptions } from 'electron'
+import { app, BrowserWindow, clipboard, ipcMain, Menu, powerMonitor, shell, type MenuItemConstructorOptions } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { join } from 'node:path'
 import { resolveCorePath, startCore, type CoreInfo, type RunningCore } from './core'
@@ -165,6 +165,25 @@ ipcMain.on('window:focus', () => {
 })
 
 ipcMain.handle('core:info', () => coreInfo ?? { error: 'core is not started yet' })
+
+// Clipboard for the terminal (the sandboxed renderer can't reach it itself).
+ipcMain.handle('clipboard:read', () => clipboard.readText())
+ipcMain.handle('clipboard:write', (_e, text: unknown) => {
+  if (typeof text === 'string') clipboard.writeText(text)
+})
+ipcMain.handle(
+  'terminal:menu',
+  (e, hasSelection: unknown) =>
+    new Promise<'copy' | 'paste' | null>((resolve) => {
+      let choice: 'copy' | 'paste' | null = null
+      const menu = Menu.buildFromTemplate([
+        { label: 'Copy', enabled: hasSelection === true, click: () => (choice = 'copy') },
+        { label: 'Paste', click: () => (choice = 'paste') }
+      ])
+      const win = BrowserWindow.fromWebContents(e.sender) ?? undefined
+      menu.popup({ window: win, callback: () => resolve(choice) })
+    })
+)
 
 app.whenReady().then(() => {
   updates = setupUpdates()
