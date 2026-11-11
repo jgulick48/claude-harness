@@ -31,3 +31,11 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Dev tooling
+/bin/
+ui/node_modules/
+ui/out/
+ui/dist/
+*.log
+.DS_Store

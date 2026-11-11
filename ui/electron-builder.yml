@@ -1,0 +1,23 @@
+appId: com.jgulick48.claudeharness
+productName: Claude Harness
+directories:
+  output: dist
+files:
+  - out/**/*
+  - package.json
+  - "!src/**"
+  - "!**/*.test.ts"
+extraResources:
+  - from: ../bin
+    to: bin
+    filter:
+      - harness-core
+      - harness-core.exe
+mac:
+  target: dmg
+win:
+  target: nsis
+linux:
+  target: AppImage
+  category: Development
+publish: null
