@@ -26,7 +26,7 @@ ln -sf "$(pwd)/CLAUDE.md" ~/.claude/CLAUDE.md
 
 Prerequisites:
 
-- Go 1.25+
+- Go 1.27+
 - Node 22
 - tmux 3.2+ on remote hosts
 
