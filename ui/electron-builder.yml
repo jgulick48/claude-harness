@@ -15,6 +15,13 @@ extraResources:
       - harness-core.exe
 artifactName: claude-harness-${version}-${os}-${arch}.${ext}
 mac:
+  # Signing and notarization are switched on from the release workflow only
+  # when the signing secrets exist (see docs/SIGNING.md); without them none of
+  # this takes effect and the build stays unsigned.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
   target:
     - target: dmg
       arch: [arm64, x64]

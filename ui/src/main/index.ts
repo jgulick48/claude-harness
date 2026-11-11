@@ -1,5 +1,6 @@
 import { app, BrowserWindow, clipboard, ipcMain, Menu, powerMonitor, shell, type MenuItemConstructorOptions } from 'electron'
 import { autoUpdater } from 'electron-updater'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { resolveCorePath, startCore, type CoreInfo, type RunningCore } from './core'
 import { UpdateController } from './updater'
@@ -32,6 +33,16 @@ function updatesSupported(): boolean {
   return true
 }
 
+/** The release workflow stamps `harnessSigned` into package.json of signed macOS builds. */
+function isSignedBuild(): boolean {
+  try {
+    const pkg = JSON.parse(readFileSync(join(app.getAppPath(), 'package.json'), 'utf8')) as { harnessSigned?: unknown }
+    return pkg.harnessSigned === true
+  } catch {
+    return false
+  }
+}
+
 function setupUpdates(): UpdateController {
   const log = (m: string): void => console.log(`[updater] ${m}`)
   autoUpdater.logger = { info: log, warn: log, error: log, debug: () => {} }
@@ -39,6 +50,7 @@ function setupUpdates(): UpdateController {
     updater: autoUpdater,
     platform: process.platform,
     supported: updatesSupported(),
+    signed: isSignedBuild(),
     openExternal: (url) => shell.openExternal(url),
     beforeInstall: stopCoreForQuit,
     onInstallFailed: () => {

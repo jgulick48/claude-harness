@@ -24,6 +24,8 @@ export interface UpdateControllerOptions {
   updater: AutoUpdaterLike
   platform: NodeJS.Platform
   supported: boolean
+  /** macOS only: the build is code-signed and notarized, so Squirrel.Mac can auto-install. */
+  signed?: boolean
   openExternal: (url: string) => void | Promise<void>
   log?: (msg: string) => void
   /** Awaited before quitAndInstall (e.g. gracefully stop the Go core). */
@@ -42,6 +44,8 @@ export class UpdateController {
   private readonly updater: AutoUpdaterLike
   private readonly platform: NodeJS.Platform
   private readonly supported: boolean
+  /** True when updates download and install automatically (not unsigned macOS). */
+  private readonly auto: boolean
   private readonly openExternal: (url: string) => void | Promise<void>
   private readonly log: (msg: string) => void
   private readonly beforeInstall: () => Promise<void>
@@ -72,17 +76,17 @@ export class UpdateController {
     this.intervalMs = opts.intervalMs ?? 4 * 60 * 60 * 1000
     this.current = this.supported ? { state: 'idle' } : { state: 'unsupported' }
 
-    // macOS builds are unsigned: Squirrel.Mac cannot auto-install, so only notify.
-    const isMac = this.platform === 'darwin'
-    this.updater.autoDownload = !isMac
-    this.updater.autoInstallOnAppQuit = !isMac
+    // Unsigned macOS builds can't auto-install with Squirrel.Mac, so only notify.
+    this.auto = this.platform !== 'darwin' || opts.signed === true
+    this.updater.autoDownload = this.auto
+    this.updater.autoInstallOnAppQuit = this.auto
 
     this.updater.on('checking-for-update', () => {
       if (this.current.state !== 'checking') this.set({ state: 'checking' })
     })
     this.updater.on('update-available', (info: { version: string }) => {
       this.manualPending = false
-      this.set({ state: 'available', version: info.version, manualDownload: this.platform === 'darwin' })
+      this.set({ state: 'available', version: info.version, manualDownload: !this.auto })
     })
     this.updater.on('update-not-available', () => {
       this.set(this.manualPending ? { state: 'up-to-date' } : { state: 'idle' })
@@ -173,10 +177,10 @@ export class UpdateController {
     this.onInstallFailed()
   }
 
-  /** macOS: open the GitHub release page for the available version. */
+  /** Unsigned macOS: open the GitHub release page for the available version. */
   openDownload(): void {
     const s = this.current
-    if (this.platform !== 'darwin' || s.state !== 'available') return
+    if (this.auto || s.state !== 'available') return
     if (!SAFE_VERSION.test(s.version)) {
       this.log(`refusing to open release page for odd version ${JSON.stringify(s.version)}`)
       return

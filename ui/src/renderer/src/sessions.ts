@@ -165,3 +165,21 @@ export function sortSessions(list: readonly Session[]): Session[] {
     (a, b) => a.created - b.created || a.id.localeCompare(b.id, undefined, { numeric: true })
   )
 }
+
+export type CheckStatus = 'ok' | 'warn' | 'error'
+
+/** One line of a host setup check (protocol v6 `hosts.check`). */
+export interface CheckItem {
+  id: string
+  label: string
+  status: CheckStatus
+  detail: string
+  fix?: string
+  fixCommand?: string
+}
+
+export interface HostReport {
+  host: string
+  checkedAt: number
+  items: CheckItem[]
+}

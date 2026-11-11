@@ -57,7 +57,7 @@ const isolatedEnv = {
 }
 
 describe.skipIf(!exists)('harness-core integration', () => {
-  it('starts, speaks protocol v5, and stops cleanly', async () => {
+  it('starts, speaks protocol v6, and stops cleanly', async () => {
     const logs: string[] = []
     const core = await startCore(corePath, { logger: (l) => logs.push(l), env: isolatedEnv })
     let exitCode: number | null | undefined
@@ -68,13 +68,13 @@ describe.skipIf(!exists)('harness-core integration', () => {
       })
     )
     try {
-      expect(core.info.protocol).toBe(5)
+      expect(core.info.protocol).toBe(6)
       expect(core.info.version).toBeTruthy()
       expect(core.info.url).toBe(`ws://127.0.0.1:${core.info.port}/ws`)
 
       const { ws, next } = await openWS(`${core.info.url}?token=${core.info.token}`)
       const hello = await next()
-      expect(hello).toMatchObject({ type: 'hello', protocol: 5, version: core.info.version })
+      expect(hello).toMatchObject({ type: 'hello', protocol: 6, version: core.info.version })
       ws.send(JSON.stringify({ type: 'ping', id: 7 }))
       // The pong and the initial events (hosts.changed, sessions.changed) are
       // sent from different goroutines, so they can arrive in either order.

@@ -48,6 +48,12 @@ func (b *Backend) hookEnv(ctx context.Context) (hookOps, hookPaths, error) {
 	if err := b.gate(); err != nil {
 		return nil, hookPaths{}, err
 	}
+	return b.hookEnvUngated(ctx)
+}
+
+// hookEnvUngated is hookEnv without the gate (the setup check must still be
+// able to look at a host whose tmux is missing).
+func (b *Backend) hookEnvUngated(ctx context.Context) (hookOps, hookPaths, error) {
 	ops, ok := b.ops.(hookOps)
 	if !ok {
 		return nil, hookPaths{}, fmt.Errorf("%w: host %s cannot manage Claude hooks", session.ErrUnavailable, b.id)
@@ -78,7 +84,14 @@ func badSettings(path string, err error) error {
 
 // HooksStatus implements session.HookInstaller.
 func (b *Backend) HooksStatus(ctx context.Context) (string, error) {
-	ops, p, err := b.hookEnv(ctx)
+	if err := b.gate(); err != nil {
+		return "", err
+	}
+	return b.hooksStatus(ctx)
+}
+
+func (b *Backend) hooksStatus(ctx context.Context) (string, error) {
+	ops, p, err := b.hookEnvUngated(ctx)
 	if err != nil {
 		return "", err
 	}

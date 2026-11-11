@@ -10,7 +10,7 @@ const local = (page: import('@playwright/test').Page) =>
   page.getByTestId('host-group').filter({ hasText: 'This computer' })
 
 test('app loads and the local host is connected', async ({ page }) => {
-  await expect(page.getByText(/^Core:/)).toHaveText(/Core: connected · v\S+ · protocol 5/)
+  await expect(page.getByText(/^Core:/)).toHaveText(/Core: connected · v\S+ · protocol 6/)
   await expect(local(page).getByLabel('connected', { exact: true })).toBeVisible()
   await expect(page.getByText('No sessions')).toBeVisible()
 })

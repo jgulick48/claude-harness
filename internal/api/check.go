@@ -1,10 +1,28 @@
 package api
 
-import "context"
+import (
+	"context"
+	"fmt"
 
-// handleCheck serves hosts.check (protocol v6).
-//
-// CONTRACT STUB (M5): replaced by the implementation.
+	"github.com/jgulick48/claude-harness/internal/session"
+)
+
+// handleCheck serves hosts.check (protocol v6): a read-only setup check.
 func (cn *conn) handleCheck(ctx context.Context, p *params) (any, error) {
-	panic("hosts.check: not implemented")
+	b, err := cn.backend(p.Host)
+	if err != nil {
+		return nil, err
+	}
+	hc, ok := b.(session.HostChecker)
+	if !ok {
+		return nil, fmt.Errorf("%w: setup check not supported on this host", session.ErrBadRequest)
+	}
+	rep, err := hc.Check(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if rep.Items == nil {
+		rep.Items = []session.CheckItem{}
+	}
+	return rep, nil
 }
