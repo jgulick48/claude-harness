@@ -364,7 +364,9 @@ func TestAttachDropsOutputBeforeSeed(t *testing.T) {
 	var pane string
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		pane = tm(t, b, "capture-pane", "-p", "-t", s.ID)
+		// -J joins wrapped lines: a long prompt (e.g. CI hostnames) can wrap the
+		// typed command so "before-attach" is split across two screen lines.
+		pane = tm(t, b, "capture-pane", "-p", "-J", "-t", s.ID)
 		if strings.Count(pane, "before-attach") >= 2 {
 			break
 		}
