@@ -42,6 +42,16 @@ make help         # list all targets
 
 The app launches the core binary from `bin/`. Set `HARNESS_CORE_PATH` to override the core binary path the app uses.
 
+The core uses the local tmux server by default. For development and tests you can point it elsewhere:
+
+| Variable | Effect |
+|---|---|
+| `HARNESS_TMUX_BIN` | tmux binary to run (default: `tmux` on `PATH`) |
+| `HARNESS_TMUX_SOCKET` | use a separate tmux server, passed as `tmux -L <name>` |
+| `HARNESS_TMUX_CONFIG` | tmux config file, passed as `-f` (e.g. `/dev/null`) |
+
+The test suites always use a private socket and `/dev/null` config, so they never touch your real tmux sessions.
+
 ## Releases & updates
 
 To cut a release: bump `version` in `ui/package.json`, commit, tag `vX.Y.Z` (matching that version) and push the tag. The Release workflow builds installers for macOS (dmg/zip, arm64 + x64), Windows (NSIS) and Linux (AppImage) and publishes them to GitHub Releases.

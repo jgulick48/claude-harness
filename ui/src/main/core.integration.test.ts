@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { startCore } from './core'
 
@@ -40,10 +40,15 @@ function openWS(url: string): Promise<{ ws: WebSocket; next: () => Promise<any> 
   })
 }
 
+// Every test core gets a private tmux socket and no tmux config, so tests never
+// touch the user's real tmux server (connecting subscribes to session lists).
+const isolatedSocket = `harness-uitest-basic-${process.pid}`
+const isolatedEnv = { HARNESS_TMUX_SOCKET: isolatedSocket, HARNESS_TMUX_CONFIG: '/dev/null' }
+
 describe.skipIf(!exists)('harness-core integration', () => {
   it('starts, speaks protocol v2, and stops cleanly', async () => {
     const logs: string[] = []
-    const core = await startCore(corePath, { logger: (l) => logs.push(l) })
+    const core = await startCore(corePath, { logger: (l) => logs.push(l), env: isolatedEnv })
     let exitCode: number | null | undefined
     const exited = new Promise<void>((r) =>
       core.onExit((e) => {
@@ -60,7 +65,10 @@ describe.skipIf(!exists)('harness-core integration', () => {
       const hello = await next()
       expect(hello).toMatchObject({ type: 'hello', protocol: 2, version: core.info.version })
       ws.send(JSON.stringify({ type: 'ping', id: 7 }))
-      expect(await next()).toEqual({ type: 'pong', id: 7 })
+      // Events (e.g. the initial sessions.changed) may arrive first; skip them.
+      let reply = await next()
+      while (reply.type === 'event') reply = await next()
+      expect(reply).toEqual({ type: 'pong', id: 7 })
       ws.close()
 
       // wrong token is rejected before upgrade
@@ -183,7 +191,11 @@ describe.skipIf(!exists || !hasTmux)('harness-core tmux scenario', () => {
     try {
       execFileSync('tmux', ['-L', socket, 'kill-server'], { stdio: 'ignore' })
     } catch {
-      /* server may not be running */
+      /* server already exited (tmux exits when its last session is killed) */
+    }
+    // tmux leaves the socket file behind; it lives at $TMUX_TMPDIR (or /tmp)/tmux-<uid>/<name>.
+    if (process.getuid) {
+      rmSync(join(process.env.TMUX_TMPDIR || '/tmp', `tmux-${process.getuid()}`, socket), { force: true })
     }
   })
 

@@ -159,10 +159,31 @@ func (s *server) ws(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, b := range s.backends {
 		id := b.ID()
+		// Backends invoke subscriber callbacks while holding their own lock, so
+		// never write to the socket from the callback: a slow client would
+		// stall the backend. Hand the latest list to a per-host sender instead,
+		// replacing any list not yet sent (only the newest matters).
+		latest := make(chan []session.Session, 1)
 		unsub := b.Subscribe(func(list []session.Session) {
-			cn.sendJSON(sessionsChanged(id, list))
+			// Callbacks are serialized by the backend, so after draining, the
+			// send below cannot block.
+			select {
+			case <-latest:
+			default:
+			}
+			latest <- list
 		})
 		defer unsub()
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case list := <-latest:
+					cn.sendJSON(sessionsChanged(id, list))
+				}
+			}
+		}()
 	}
 
 	for {
