@@ -373,7 +373,7 @@ export function Sidebar(): React.JSX.Element {
             setHostMenu({ x, y, host, confirmRemove: false })
           }
           return (
-            <section className="host-group" key={host.id}>
+            <section className="host-group" data-testid="host-group" key={host.id}>
               <div
                 className="host-header"
                 onContextMenu={(e) => {
