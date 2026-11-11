@@ -1,7 +1,7 @@
 # Core ↔ UI protocol
 
 How the Electron app launches `harness-core` and talks to it. See
-[ARCHITECTURE.md](ARCHITECTURE.md) §3 and §7 for background. Protocol version: **4** (v2 added requests/results, events, sessions and terminals in M1; v3 added SSH host management in M2; v4 adds auto-reconnect, `~/.ssh/config` import and directory suggestions in M3).
+[ARCHITECTURE.md](ARCHITECTURE.md) §3 and §7 for background. Protocol version: **5** (v2 added requests/results, events, sessions and terminals in M1; v3 added SSH host management in M2; v4 added auto-reconnect, `~/.ssh/config` import and directory suggestions in M3; v5 adds Claude Code status in M4).
 
 ## 1. Launch
 
@@ -19,7 +19,7 @@ How the Electron app launches `harness-core` and talks to it. See
    **exactly one line** to stdout, then nothing else to stdout:
 
    ```json
-   {"type":"ready","addr":"127.0.0.1:54321","port":54321,"version":"0.1.0-dev","protocol":4}
+   {"type":"ready","addr":"127.0.0.1:54321","port":54321,"version":"0.1.0-dev","protocol":5}
    ```
 
 4. All logs go to **stderr** (`log/slog` text format). The UI forwards them to
@@ -52,7 +52,7 @@ compared in constant time.
 
 | Endpoint | Auth | Response |
 |---|---|---|
-| `GET /healthz` | Header `Authorization: Bearer <token>` | `200 {"ok":true,"version":"…","protocol":4}`; `401` if the token is missing or wrong |
+| `GET /healthz` | Header `Authorization: Bearer <token>` | `200 {"ok":true,"version":"…","protocol":5}`; `401` if the token is missing or wrong |
 | `GET /ws?token=<token>` | Query parameter (browser WebSockets can't set headers) | WebSocket upgrade; `401` **before** upgrade if the token is missing or wrong |
 
 The WebSocket server doesn't check the Origin header, because the Electron
@@ -68,7 +68,7 @@ Control messages are JSON in **text** frames. Terminal data travels in
 
 | Direction | Message | Notes |
 |---|---|---|
-| core → UI | `{"type":"hello","version":"0.1.0-dev","protocol":4}` | Sent right after connecting |
+| core → UI | `{"type":"hello","version":"0.1.0-dev","protocol":5}` | Sent right after connecting |
 | UI → core | `{"type":"ping","id":1}` | `id` is an integer chosen by the client |
 | core → UI | `{"type":"pong","id":1}` | Echoes the `id` |
 | core → UI | `{"type":"error","id":1,"message":"…"}` | Reply to a failed request, or to an unknown `type`. `id` is echoed if the request had one, otherwise omitted. The connection stays open. |
@@ -101,9 +101,14 @@ Host:    {"id":"local","name":"This computer","kind":"local","state":"connected"
           "hostKey":{"address":"devbox.lan","keyType":"ssh-ed25519","fingerprint":"SHA256:…"}}
          state: "connected" | "connecting" | "disconnected" | "unavailable" | "host_key_unknown" | "error"
          ("error" carries the reason for disconnected / unavailable / error;
-          "retryAt" (unix ms) is set while disconnected with an automatic retry scheduled)
+          "retryAt" (unix ms) is set while disconnected with an automatic retry scheduled;
+          "claudeHooks": "installed" | "outdated" | "missing" | "unknown", whether the
+          Claude status hooks are installed on that host, omitted until checked)
 Session: {"id":"$3","name":"h-api-1","harnessName":"","managed":true,"cwd":"/home/me/work/api",
-          "windows":1,"attached":0,"created":1794420293}
+          "windows":1,"attached":0,"created":1794420293,
+          "claudeStatus":"waiting","claudeStatusAt":1794420400}
+         claudeStatus: "working" | "waiting" | "idle" | "unknown" | "" (Claude not running);
+         see §5.2
 ```
 
 | Method | Params | Result |
@@ -113,6 +118,8 @@ Session: {"id":"$3","name":"h-api-1","harnessName":"","managed":true,"cwd":"/hom
 | `hosts.remove` | `host` | `null`. Disconnects and forgets the host. Its tmux sessions keep running there. `local` can't be removed. |
 | `hosts.connect` | `host` | `null`. Reconnects a host that is `disconnected` or in `error`. |
 | `hosts.configHosts` | none | `[ConfigHost]`: concrete `Host` entries from `~/.ssh/config` (wildcard patterns skipped), each `{"alias","hostName","user","port","added"}`. `added` is true when a saved host already uses that alias as its target. |
+| `hosts.installHooks` | `host` | `null`. Installs the Claude status hooks on the host (§5.2) after backing up its settings file. Idempotent. The host's `claudeHooks` updates via `hosts.changed`. |
+| `hosts.removeHooks` | `host` | `null`. Removes only our hook entries and script. Idempotent. |
 | `hosts.trustKey` | `host`, `fingerprint` | `null`. Adds the pending host key to `~/.ssh/known_hosts` and reconnects. `fingerprint` must match `hostKey.fingerprint`; this guards against a key changing between the prompt and the click. |
 | `sessions.list` | `host` | `[Session]` |
 | `sessions.create` | `host`, `dir` (optional, `~` allowed, default home), `name` (optional), `command` (`"shell"` default or `"claude"`) | `Session` |
@@ -144,6 +151,24 @@ host's list changes:
 **Display label rule (UI):** `harnessName` if non-empty, otherwise the
 basename of `cwd`, otherwise `name`. `managed: false` means the session was
 started outside the app, so the UI tags it `external`.
+
+### 5.2 Claude status
+
+`claudeStatus` comes from Claude Code hooks that the app installs, with the
+user's confirmation, on each host. A hook writes the tmux **session options**
+`@claude_status` and `@claude_status_at` (unix seconds) for the session its pane
+belongs to. Core reads those options with the session list, so a change shows
+up within one poll (≤ 2 s) in `sessions.changed`.
+
+| `claudeStatus` | Meaning | Set by |
+|---|---|---|
+| `working` | Processing a prompt or running tools | `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure` |
+| `waiting` | Needs the user: a permission decision or a question | `PermissionRequest`; `Notification` whose `notification_type` is `permission_prompt`, `elicitation_dialog`, `elicitation_url_dialog` or `agent_needs_input` |
+| `idle` | Finished its turn; nothing pending | `Stop`, `StopFailure`, `SessionStart` (other notification types leave the status unchanged) |
+| `unknown` | Claude is running (the active pane's command is `claude`) but no hook has reported | none (core derives it) |
+| `""` | Claude isn't running | `SessionEnd` clears the options. Core also reports `""` whenever the active pane's command is a shell (`sh`, `bash`, `zsh`, `fish`, `dash`, `ksh`, `tcsh`), in case Claude exited without `SessionEnd`. |
+
+The hooks never affect Claude: the script always exits 0 and prints nothing.
 
 ### 5.1 Directory suggestions
 
