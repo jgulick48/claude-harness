@@ -4,23 +4,12 @@ A cross-platform desktop app (Windows, macOS, Linux) for running Claude Code acr
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and [docs/CORE_PROTOCOL.md](docs/CORE_PROTOCOL.md) for the core protocol.
 
-## Claude Code config
+## Claude Code instructions
 
-Version-controlled configuration for Claude Code.
+`CLAUDE.md` holds the instructions Claude Code follows when working on this repository. Claude Code loads it automatically from the repo root; it isn't meant to be installed anywhere else.
 
-### Contents
-
-- `CLAUDE.md` — global instructions loaded into every Claude Code session:
-  - **Plan and delegate by cost** — plan tasks first and route subtasks to the cheapest suitable model (Haiku / Sonnet / Opus).
-  - **Feature branches and PRs** — one branch per feature, PR into `main` with full notes when ready.
-
-### Install
-
-Symlink the repo's `CLAUDE.md` into place so edits here apply globally:
-
-```sh
-ln -sf "$(pwd)/CLAUDE.md" ~/.claude/CLAUDE.md
-```
+- **Plan and delegate by cost:** plan tasks first and route subtasks to the cheapest suitable model (Haiku / Sonnet / Opus).
+- **Feature branches and PRs:** one branch per feature, with a PR into `main` and full notes when it's ready.
 
 ## Development
 
