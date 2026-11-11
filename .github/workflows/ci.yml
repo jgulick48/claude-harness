@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Check gofmt
+        if: runner.os == 'Linux'
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race ./...
+
+      - name: Build harness-core
+        run: |
+          EXT=""
+          if [ "$RUNNER_OS" = "Windows" ]; then EXT=.exe; fi
+          mkdir -p bin
+          go build -o "bin/harness-core${EXT}" ./cmd/harness-core
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install UI dependencies
+        working-directory: ui
+        run: npm ci
+
+      - name: UI typecheck
+        working-directory: ui
+        run: npm run typecheck
+
+      - name: UI tests
+        working-directory: ui
+        run: npm test
+
+      - name: Package UI (unsigned)
+        working-directory: ui
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run package
+
+      - name: Upload UI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-harness-${{ matrix.os }}
+          path: ui/dist/
+          if-no-files-found: warn
+          retention-days: 7
