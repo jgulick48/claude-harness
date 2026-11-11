@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -66,11 +67,14 @@ func TestPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi.Mode().Perm() != 0o600 {
-		t.Fatalf("mode %v", fi.Mode())
-	}
-	if di, _ := os.Stat(filepath.Dir(p)); di.Mode().Perm() != 0o700 {
-		t.Fatalf("dir mode %v", di.Mode())
+	// Unix permission bits don't exist on Windows (os.Stat reports 0666).
+	if runtime.GOOS != "windows" {
+		if fi.Mode().Perm() != 0o600 {
+			t.Fatalf("mode %v", fi.Mode())
+		}
+		if di, _ := os.Stat(filepath.Dir(p)); di.Mode().Perm() != 0o700 {
+			t.Fatalf("dir mode %v", di.Mode())
+		}
 	}
 	s2, err := New(p, nil)
 	if err != nil {

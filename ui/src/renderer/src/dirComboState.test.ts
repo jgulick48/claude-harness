@@ -8,7 +8,7 @@ import {
   suggestItems,
   wantsSuggestions,
   type ComboState
-} from './dirCombo'
+} from './dirComboState'
 
 const withItems = (paths: string[], extra: Partial<ComboState> = {}): ComboState => ({
   ...initialCombo,

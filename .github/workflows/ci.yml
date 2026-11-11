@@ -43,6 +43,18 @@ jobs:
         if: runner.os == 'macOS'
         run: command -v tmux || brew install tmux
 
+      # macOS and Windows file systems are case-insensitive: two paths that
+      # differ only in case break the build there but not on Linux.
+      - name: Check for case-colliding file names
+        if: runner.os == 'Linux'
+        run: |
+          dups="$(git ls-files | sort -f | uniq -di)"
+          if [ -n "$dups" ]; then
+            echo "These paths collide on case-insensitive file systems:"
+            echo "$dups"
+            exit 1
+          fi
+
       - name: Check gofmt
         if: runner.os == 'Linux'
         run: |

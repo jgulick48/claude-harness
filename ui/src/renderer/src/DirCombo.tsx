@@ -9,7 +9,7 @@ import {
   suggestItems,
   wantsSuggestions,
   type DirEntry
-} from './dirCombo'
+} from './dirComboState'
 
 const DEBOUNCE_MS = 150
 
