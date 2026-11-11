@@ -3,12 +3,11 @@
 // (SSH_AUTH_SOCK on macOS/Linux, Pageant on Windows), identity files as a
 // fallback on macOS/Linux, and strict known_hosts checking.
 //
-// CONTRACT STUB (M2): signatures are fixed; the implementation replaces the
-// bodies. Other packages build against this file.
+// The exported signatures are a fixed contract that other packages build
+// against.
 package sshconn
 
 import (
-	"context"
 	"errors"
 	"log/slog"
 	"time"
@@ -23,8 +22,8 @@ type Options struct {
 	// AgentSocket is the agent's unix socket. Default $SSH_AUTH_SOCK.
 	// Ignored on Windows, where Pageant is the agent.
 	AgentSocket string
-	// IdentityFiles are tried after the config's IdentityFile entries and the
-	// defaults (~/.ssh/id_ed25519, id_ecdsa, id_rsa). macOS/Linux only;
+	// IdentityFiles are tried after the config's IdentityFile entries and
+	// before the defaults (~/.ssh/id_ed25519, id_ecdsa, id_rsa). macOS/Linux only;
 	// passphrase-protected keys are skipped (load them into the agent).
 	IdentityFiles []string
 	Timeout       time.Duration // per-hop dial + handshake; default 15s
@@ -41,33 +40,6 @@ type Resolved struct {
 	IdentityFiles []string
 	ProxyJump     []string // hops in order, each an alias or user@host[:port]
 }
-
-// Resolve applies ~/.ssh/config to target.
-func Resolve(target string, opts Options) (Resolved, error) {
-	panic("sshconn.Resolve: not implemented")
-}
-
-// Client is a live SSH connection (through any ProxyJump hops).
-type Client struct{}
-
-// Dial resolves target, connects through ProxyJump hops, verifies host keys
-// against known_hosts, and authenticates. Errors include *UnknownHostKeyError,
-// *HostKeyChangedError, and errors wrapping ErrNoAuthMethods.
-func Dial(ctx context.Context, target string, opts Options) (*Client, error) {
-	panic("sshconn.Dial: not implemented")
-}
-
-// SSH returns the underlying client for opening sessions.
-func (c *Client) SSH() *ssh.Client { panic("not implemented") }
-
-// Done is closed when the connection is lost (keepalive failure, EOF) or Close.
-func (c *Client) Done() <-chan struct{} { panic("not implemented") }
-
-// Err reports why Done closed: nil after Close, otherwise the cause.
-func (c *Client) Err() error { panic("not implemented") }
-
-// Close closes the connection and every hop.
-func (c *Client) Close() error { panic("not implemented") }
 
 // UnknownHostKeyError: the host (or a ProxyJump hop) isn't in known_hosts.
 type UnknownHostKeyError struct {
@@ -96,9 +68,3 @@ func (e *HostKeyChangedError) Error() string {
 
 // ErrNoAuthMethods: no agent keys or usable identity files.
 var ErrNoAuthMethods = errors.New("no SSH authentication methods available")
-
-// TrustHostKey appends address/key to knownHostsFile (created if missing,
-// mode 0600, parent dir 0700), in OpenSSH format.
-func TrustHostKey(knownHostsFile, address string, key ssh.PublicKey) error {
-	panic("sshconn.TrustHostKey: not implemented")
-}

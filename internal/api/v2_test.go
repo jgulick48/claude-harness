@@ -73,8 +73,10 @@ type fakeBackend struct {
 	termCh   chan *fakeTerm
 }
 
-func newFakeBackend() *fakeBackend {
-	return &fakeBackend{id: "local", unsubbed: make(chan struct{}), termCh: make(chan *fakeTerm, 4)}
+func newFakeBackend() *fakeBackend { return newFakeBackendID("local") }
+
+func newFakeBackendID(id string) *fakeBackend {
+	return &fakeBackend{id: id, unsubbed: make(chan struct{}), termCh: make(chan *fakeTerm, 4)}
 }
 
 func (b *fakeBackend) ID() string { return b.id }
@@ -125,17 +127,25 @@ func (b *fakeBackend) Close() error { return nil }
 
 func newBackendTS(t *testing.T, b *fakeBackend) *httptest.Server {
 	t.Helper()
-	ts := httptest.NewServer(NewServer(tok, slog.New(slog.NewTextHandler(io.Discard, nil)), []session.Backend{b}))
+	return newHMTS(t, newFakeHM(b))
+}
+
+func newHMTS(t *testing.T, hm session.HostManager) *httptest.Server {
+	t.Helper()
+	ts := httptest.NewServer(NewServer(tok, slog.New(slog.NewTextHandler(io.Discard, nil)), hm))
 	t.Cleanup(ts.Close)
 	return ts
 }
 
-// connect dials, consumes hello and the initial sessions.changed.
+// connect dials, consumes hello, the initial hosts.changed and the initial sessions.changed.
 func connect(t *testing.T, b *fakeBackend) (*websocket.Conn, context.Context) {
 	t.Helper()
 	c, ctx := dial(t, newBackendTS(t, b))
 	if m := readMsg(t, ctx, c); m["type"] != "hello" {
 		t.Fatalf("hello: %v", m)
+	}
+	if m := readMsg(t, ctx, c); m["event"] != "hosts.changed" {
+		t.Fatalf("initial hosts event: %v", m)
 	}
 	if m := readMsg(t, ctx, c); m["event"] != "sessions.changed" {
 		t.Fatalf("initial event: %v", m)

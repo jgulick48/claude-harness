@@ -1,11 +1,72 @@
 // Shared protocol types and pure helpers for hosts and sessions.
+export type HostState =
+  | 'connected'
+  | 'connecting'
+  | 'disconnected'
+  | 'unavailable'
+  | 'host_key_unknown'
+  | 'error'
+
+export interface HostKey {
+  address: string
+  keyType: string
+  fingerprint: string
+}
+
 export interface Host {
   id: string
   name: string
-  state: 'connected' | 'unavailable'
+  kind: 'local' | 'ssh'
+  target?: string
+  state: HostState
+  /** Reason for disconnected / unavailable / error. */
   error?: string
-  home: string
+  hostKey?: HostKey
+  home?: string
   tmuxVersion?: string
+}
+
+/** One-line status for a host header; empty when connected. */
+export function hostStatusText(h: Pick<Host, 'state' | 'error'>): string {
+  switch (h.state) {
+    case 'connected':
+      return ''
+    case 'connecting':
+      return 'Connecting…'
+    case 'unavailable':
+      return h.error || 'Host unavailable'
+    case 'disconnected':
+      return h.error || 'Disconnected'
+    case 'error':
+      return h.error || 'Connection error'
+    case 'host_key_unknown':
+      return 'Host key not trusted yet'
+  }
+}
+
+/** Sessions can only be created on connected hosts. */
+export function canCreateOn(h: Pick<Host, 'state'>): boolean {
+  return h.state === 'connected'
+}
+
+/** hosts.connect applies to hosts that are disconnected or in error. */
+export function canReconnect(h: Pick<Host, 'kind' | 'state'>): boolean {
+  return h.kind === 'ssh' && (h.state === 'disconnected' || h.state === 'error')
+}
+
+/**
+ * Params for hosts.trustKey. Built from the same hostKey the trust panel
+ * displays, so the fingerprint sent is exactly the one the user verified.
+ * Null when there is nothing to trust.
+ */
+export function trustKeyParams(h: Pick<Host, 'id' | 'state' | 'hostKey'>): { host: string; fingerprint: string } | null {
+  if (h.state !== 'host_key_unknown' || !h.hostKey?.fingerprint) return null
+  return { host: h.id, fingerprint: h.hostKey.fingerprint }
+}
+
+/** Overlay text when a terminal stream closes. */
+export function closedMessage(reason: string, hostName: string): string {
+  return reason === 'connection lost' ? `Connection to ${hostName} lost` : 'Session ended'
 }
 
 export interface Session {

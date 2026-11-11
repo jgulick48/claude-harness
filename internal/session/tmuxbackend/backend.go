@@ -42,6 +42,8 @@ type Backend struct {
 	id, name string
 	run      tmux.Runner
 	home     string
+	kind     string
+	ops      hostOps
 	poll     time.Duration
 	log      *slog.Logger
 
@@ -63,6 +65,58 @@ type Backend struct {
 	termMu sync.Mutex
 	terms  map[*terminal]struct{}
 	closed bool
+
+	// SSH backends only. lostCh is closed when the connection drops (never
+	// closed for local backends); noTmux is set when tmux could not be found.
+	lostCh chan struct{}
+	noTmux string // non-empty: reason tmux is unusable
+}
+
+// hostOps are the host-side operations that don't go through tmux.
+type hostOps interface {
+	// dirExists reports whether dir is an existing directory on the host.
+	dirExists(ctx context.Context, dir string) (bool, error)
+	// homeDir returns the host user's home directory.
+	homeDir(ctx context.Context) (string, error)
+}
+
+type localOps struct{ home string }
+
+func (o localOps) dirExists(_ context.Context, dir string) (bool, error) {
+	fi, err := os.Stat(dir)
+	return err == nil && fi.IsDir(), nil
+}
+
+func (o localOps) homeDir(context.Context) (string, error) { return o.home, nil }
+
+// gate returns an ErrUnavailable error when the backend can't serve requests.
+func (b *Backend) gate() error {
+	if b.lostCh != nil {
+		select {
+		case <-b.lostCh:
+			return fmt.Errorf("%w: connection lost", session.ErrUnavailable)
+		default:
+		}
+	}
+	if b.noTmux != "" {
+		return fmt.Errorf("%w: %s", session.ErrUnavailable, b.noTmux)
+	}
+	return nil
+}
+
+// mapError is mapErr, but reports a dropped connection as ErrUnavailable.
+func (b *Backend) mapError(err error, id string) error {
+	if err == nil {
+		return nil
+	}
+	if b.lostCh != nil {
+		select {
+		case <-b.lostCh:
+			return fmt.Errorf("%w: connection lost", session.ErrUnavailable)
+		default:
+		}
+	}
+	return mapErr(err, id)
 }
 
 // NewLocal returns a backend for the tmux server on this machine.
@@ -82,7 +136,7 @@ func newBackend(id, name string, run tmux.Runner, opts Options) *Backend {
 		opts.Logger = slog.New(slog.DiscardHandler)
 	}
 	return &Backend{
-		id: id, name: name, run: run,
+		id: id, name: name, run: run, kind: session.KindLocal, ops: localOps{home: opts.Home},
 		home: opts.Home, poll: opts.PollInterval, log: opts.Logger,
 		subs:   map[int]func([]session.Session){},
 		kickCh: make(chan struct{}, 1),
@@ -100,7 +154,20 @@ func (b *Backend) Host(ctx context.Context) session.Host {
 	if !b.hostAt.IsZero() && time.Since(b.hostAt) < hostCacheTTL {
 		return b.hostCache
 	}
-	h := session.Host{ID: b.id, Name: b.name, Home: b.home, State: session.HostConnected}
+	h := session.Host{ID: b.id, Name: b.name, Kind: b.kind, Home: b.home, State: session.HostConnected}
+	if b.lostCh != nil {
+		select {
+		case <-b.lostCh:
+			h.State, h.Error = session.HostDisconnected, "connection lost"
+			return h
+		default:
+		}
+	}
+	if b.noTmux != "" {
+		h.State, h.Error = session.HostUnavailable, b.noTmux
+		b.hostCache, b.hostAt = h, time.Now()
+		return h
+	}
 	out, err := b.run.Output(ctx, "-V")
 	switch {
 	case err != nil:
@@ -160,12 +227,15 @@ var listFormat = strings.Join([]string{
 }, fieldSep)
 
 func (b *Backend) List(ctx context.Context) ([]session.Session, error) {
+	if err := b.gate(); err != nil {
+		return nil, err
+	}
 	out, err := b.run.Output(ctx, "list-sessions", "-F", listFormat)
 	if err != nil {
 		if isNoServer(err) {
 			return []session.Session{}, nil
 		}
-		return nil, mapErr(err, "")
+		return nil, b.mapError(err, "")
 	}
 	list := []session.Session{}
 	for _, line := range strings.Split(string(out), "\n") {
@@ -203,13 +273,20 @@ func (b *Backend) expandDir(dir string) string {
 }
 
 func (b *Backend) Create(ctx context.Context, opts session.CreateOptions) (session.Session, error) {
+	if err := b.gate(); err != nil {
+		return session.Session{}, err
+	}
 	switch opts.Command {
 	case "", session.CommandShell, session.CommandClaude:
 	default:
 		return session.Session{}, fmt.Errorf("%w: unknown command: %s", session.ErrBadRequest, opts.Command)
 	}
 	dir := b.expandDir(opts.Dir)
-	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+	ok, err := b.ops.dirExists(ctx, dir)
+	if err != nil {
+		return session.Session{}, b.mapError(err, "")
+	}
+	if !ok {
 		return session.Session{}, fmt.Errorf("%w: directory not found: %s", session.ErrBadRequest, dir)
 	}
 
@@ -237,7 +314,7 @@ func (b *Backend) Create(ctx context.Context, opts session.CreateOptions) (sessi
 		if attempt < 3 && strings.Contains(err.Error(), "duplicate session") {
 			continue
 		}
-		return session.Session{}, mapErr(err, "")
+		return session.Session{}, b.mapError(err, "")
 	}
 
 	fail := func(err error) (session.Session, error) {
@@ -309,20 +386,26 @@ func (b *Backend) waitShellReady(ctx context.Context, id string) {
 }
 
 func (b *Backend) Kill(ctx context.Context, id string) error {
+	if err := b.gate(); err != nil {
+		return err
+	}
 	if _, err := b.run.Output(ctx, "kill-session", "-t", id); err != nil {
-		return mapErr(err, id)
+		return b.mapError(err, id)
 	}
 	b.kick()
 	return nil
 }
 
 func (b *Backend) Rename(ctx context.Context, id, name string) error {
+	if err := b.gate(); err != nil {
+		return err
+	}
 	args := []string{"set-option", "-t", id, "@harness_name", name}
 	if name == "" {
 		args = []string{"set-option", "-u", "-q", "-t", id, "@harness_name"}
 	}
 	if _, err := b.run.Output(ctx, args...); err != nil {
-		return mapErr(err, id)
+		return b.mapError(err, id)
 	}
 	b.kick()
 	return nil
@@ -385,7 +468,7 @@ func (b *Backend) Subscribe(fn func([]session.Session)) (unsubscribe func()) {
 	id := b.nextSub
 	b.nextSub++
 	b.subs[id] = fn
-	if len(b.subs) == 1 && b.stopPoll == nil && !b.isClosed() {
+	if len(b.subs) == 1 && b.stopPoll == nil && !b.isClosed() && b.gate() == nil {
 		b.stopPoll = make(chan struct{})
 		go b.pollLoop(b.stopPoll)
 	}
@@ -501,4 +584,43 @@ func (b *Backend) Close() error {
 		t.Close()
 	}
 	return nil
+}
+
+func (b *Backend) isLost() bool {
+	if b.lostCh == nil {
+		return false
+	}
+	select {
+	case <-b.lostCh:
+		return true
+	default:
+		return false
+	}
+}
+
+// onConnectionLost ends every open terminal with "connection lost" and stops
+// polling. Later requests fail through gate.
+func (b *Backend) onConnectionLost() {
+	b.termMu.Lock()
+	terms := make([]*terminal, 0, len(b.terms))
+	for t := range b.terms {
+		terms = append(terms, t)
+	}
+	b.termMu.Unlock()
+
+	b.subsMu.Lock()
+	if b.stopPoll != nil {
+		close(b.stopPoll)
+		b.stopPoll = nil
+	}
+	b.subsMu.Unlock()
+
+	for _, t := range terms {
+		t.mu.Lock()
+		if t.err == nil && !t.closing {
+			t.err = errConnLost
+		}
+		t.mu.Unlock()
+		t.Close()
+	}
 }

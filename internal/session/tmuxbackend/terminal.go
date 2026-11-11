@@ -21,7 +21,14 @@ const (
 	paneFormat    = "#{session_id} #{pane_id} #{cursor_x} #{cursor_y} #{alternate_on}"
 )
 
-var errSessionEnded = errors.New("session ended")
+var (
+	errSessionEnded = errors.New("session ended")
+	errConnLost     = errors.New("connection lost")
+)
+
+// lostGrace is how long an SSH terminal whose stream died waits for the
+// connection-lost signal before reporting "session ended".
+const lostGrace = 3 * time.Second
 
 type paneInfo struct {
 	session string
@@ -47,6 +54,7 @@ type terminal struct {
 	sid       string // canonical session id, e.g. "$3"
 	rows      int
 	closing   bool
+	sawExit   bool
 	err       error
 	writeMu   sync.Mutex // keeps multi-chunk writes ordered
 }
@@ -55,15 +63,18 @@ func (b *Backend) Attach(ctx context.Context, id string, cols, rows int) (sessio
 	if cols <= 0 || rows <= 0 {
 		return nil, fmt.Errorf("%w: invalid terminal size %dx%d", session.ErrBadRequest, cols, rows)
 	}
+	if err := b.gate(); err != nil {
+		return nil, err
+	}
 	if b.isClosed() {
 		return nil, fmt.Errorf("%w: backend closed", session.ErrUnavailable)
 	}
 	if _, err := b.run.Output(ctx, "has-session", "-t", id); err != nil {
-		return nil, mapErr(err, id)
+		return nil, b.mapError(err, id)
 	}
 	proc, err := b.run.Start(ctx, "-C", "attach-session", "-t", id)
 	if err != nil {
-		return nil, mapErr(err, id)
+		return nil, b.mapError(err, id)
 	}
 
 	tctx, cancel := context.WithCancel(context.Background())
@@ -82,7 +93,7 @@ func (b *Backend) Attach(ctx context.Context, id string, cols, rows int) (sessio
 		if errors.Is(err, tmux.ErrClosed) { // session vanished between has-session and attach
 			return nil, fmt.Errorf("%w: %s", session.ErrNotFound, id)
 		}
-		return nil, mapErr(err, id)
+		return nil, b.mapError(err, id)
 	}
 
 	b.termMu.Lock()
@@ -205,6 +216,25 @@ func (t *terminal) run(dropUntil uint64) {
 	defer t.cc.Close()
 	defer func() { // runs first: decides Err before Output closes
 		t.mu.Lock()
+		abrupt := !t.closing && t.err == nil && !t.sawExit
+		t.mu.Unlock()
+		if abrupt && t.b.lostCh != nil {
+			// The stream died without %exit: over SSH that is usually the
+			// connection dropping, which may be reported a moment later.
+			select {
+			case <-t.b.lostCh:
+			case <-time.After(lostGrace):
+			case <-t.done:
+			}
+			if t.b.isLost() {
+				t.mu.Lock()
+				if t.err == nil {
+					t.err = errConnLost
+				}
+				t.mu.Unlock()
+			}
+		}
+		t.mu.Lock()
 		if !t.closing && t.err == nil {
 			t.err = errSessionEnded
 		}
@@ -235,6 +265,9 @@ func (t *terminal) run(dropUntil uint64) {
 					}
 				}
 			case "exit":
+				t.mu.Lock()
+				t.sawExit = true
+				t.mu.Unlock()
 				return
 			case "window-pane-changed", "session-window-changed":
 				seq, ok := t.reseed(pane, n)

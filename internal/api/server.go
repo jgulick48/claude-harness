@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,18 +25,15 @@ import (
 const readLimit = 4 << 20
 
 type server struct {
-	token    string
-	logger   *slog.Logger
-	backends []session.Backend
-	byID     map[string]session.Backend
+	token  string
+	logger *slog.Logger
+	hm     session.HostManager
 }
 
 // NewServer returns the handler serving /healthz and /ws, guarded by token.
-func NewServer(token string, logger *slog.Logger, backends []session.Backend) http.Handler {
-	s := &server{token: token, logger: logger, backends: backends, byID: map[string]session.Backend{}}
-	for _, b := range backends {
-		s.byID[b.ID()] = b
-	}
+// hm owns the hosts; the API follows its changes while connections are open.
+func NewServer(token string, logger *slog.Logger, hm session.HostManager) http.Handler {
+	s := &server{token: token, logger: logger, hm: hm}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /ws", s.ws)
@@ -126,6 +124,8 @@ type conn struct {
 	ctx    context.Context
 	logger *slog.Logger
 
+	ev *events
+
 	mu      sync.Mutex
 	closed  bool
 	nextID  uint32
@@ -157,34 +157,8 @@ func (s *server) ws(w http.ResponseWriter, r *http.Request) {
 	if err := cn.sendJSON(hello{"hello", version.Version, version.Protocol}); err != nil {
 		return
 	}
-	for _, b := range s.backends {
-		id := b.ID()
-		// Backends invoke subscriber callbacks while holding their own lock, so
-		// never write to the socket from the callback: a slow client would
-		// stall the backend. Hand the latest list to a per-host sender instead,
-		// replacing any list not yet sent (only the newest matters).
-		latest := make(chan []session.Session, 1)
-		unsub := b.Subscribe(func(list []session.Session) {
-			// Callbacks are serialized by the backend, so after draining, the
-			// send below cannot block.
-			select {
-			case <-latest:
-			default:
-			}
-			latest <- list
-		})
-		defer unsub()
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case list := <-latest:
-					cn.sendJSON(sessionsChanged(id, list))
-				}
-			}
-		}()
-	}
+	cn.startEvents()
+	defer cn.stopEvents()
 
 	for {
 		typ, data, err := c.Read(ctx)
@@ -196,6 +170,146 @@ func (s *server) ws(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		cn.handleText(data)
+	}
+}
+
+// Event delivery. HostManager and Backend subscriber callbacks may run while
+// the publisher holds its own locks, so they must never write to the socket: a
+// slow client would stall the publisher. Callbacks only record the latest value
+// under evMu and wake the connection's single pump goroutine, which writes.
+// Only the newest hosts list and the newest sessions list per host matter, so
+// anything not yet sent is replaced (latest wins). The callbacks never block,
+// and the pump never holds evMu while writing or calling into a publisher.
+//
+// The pump also keeps the per-host session subscriptions in step with the host
+// set: hosts added mid-connection are subscribed (their initial
+// sessions.changed is sent), removed hosts are unsubscribed.
+type events struct {
+	mu       sync.Mutex
+	hosts    []session.Host
+	hostsDue bool
+	sessions map[string][]session.Session
+	order    []string // hosts with pending sessions, first-change order
+	wake     chan struct{}
+	unsubHM  func()
+	subs     map[string]*hostSub
+	pumpDone chan struct{}
+	stopOnce sync.Once
+	stopped  chan struct{}
+}
+
+type hostSub struct {
+	b     session.Backend
+	unsub func()
+}
+
+func (cn *conn) startEvents() {
+	ev := &events{sessions: map[string][]session.Session{}, wake: make(chan struct{}, 1),
+		subs: map[string]*hostSub{}, pumpDone: make(chan struct{}), stopped: make(chan struct{})}
+	cn.ev = ev
+	go cn.pump()
+	ev.unsubHM = cn.s.hm.Subscribe(func(hosts []session.Host) {
+		ev.mu.Lock()
+		ev.hosts, ev.hostsDue = hosts, true
+		ev.mu.Unlock()
+		ev.poke()
+	})
+}
+
+func (ev *events) poke() {
+	select {
+	case ev.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (cn *conn) stopEvents() {
+	ev := cn.ev
+	ev.unsubHM()
+	close(ev.stopped)
+	<-ev.pumpDone
+	for _, hs := range ev.subs {
+		hs.unsub()
+	}
+}
+
+func (cn *conn) pump() {
+	ev := cn.ev
+	defer close(ev.pumpDone)
+	for {
+		select {
+		case <-cn.ctx.Done():
+			return
+		case <-ev.stopped:
+			return
+		case <-ev.wake:
+		}
+		cn.reconcile()
+		ev.mu.Lock()
+		var hosts []session.Host
+		due := ev.hostsDue
+		if due {
+			hosts = ev.hosts
+			ev.hostsDue = false
+		}
+		order := ev.order
+		pending := ev.sessions
+		ev.order, ev.sessions = nil, map[string][]session.Session{}
+		ev.mu.Unlock()
+		if due {
+			if hosts == nil {
+				hosts = []session.Host{}
+			}
+			if cn.sendJSON(map[string]any{"type": "event", "event": "hosts.changed", "hosts": hosts}) != nil {
+				return
+			}
+		}
+		for _, id := range order {
+			// Skip hosts removed since the list was recorded.
+			if _, ok := ev.subs[id]; !ok {
+				continue
+			}
+			if cn.sendJSON(sessionsChanged(id, pending[id])) != nil {
+				return
+			}
+		}
+	}
+}
+
+// reconcile subscribes to backends that appeared and unsubscribes from ones
+// that went away (or were replaced). Runs only on the pump goroutine.
+func (cn *conn) reconcile() {
+	ev := cn.ev
+	want := map[string]session.Backend{}
+	for _, b := range cn.s.hm.Backends() {
+		want[b.ID()] = b
+	}
+	for id, hs := range ev.subs {
+		if b, ok := want[id]; !ok || b != hs.b {
+			hs.unsub()
+			delete(ev.subs, id)
+			ev.mu.Lock()
+			delete(ev.sessions, id)
+			ev.order = slices.DeleteFunc(ev.order, func(o string) bool { return o == id })
+			ev.mu.Unlock()
+		}
+	}
+	for id, b := range want {
+		if _, ok := ev.subs[id]; ok {
+			continue
+		}
+		hs := &hostSub{b: b}
+		ev.subs[id] = hs
+		// Subscribe calls back immediately; the callback only records.
+		hs.unsub = b.Subscribe(func(list []session.Session) {
+			ev.mu.Lock()
+			if _, pending := ev.sessions[id]; !pending {
+				ev.order = append(ev.order, id)
+			}
+			ev.sessions[id] = list
+			ev.mu.Unlock()
+			ev.poke()
+		})
 	}
 }
 
@@ -264,18 +378,21 @@ func parseID(raw json.RawMessage) *int64 {
 }
 
 type params struct {
-	Host    string          `json:"host"`
-	Session string          `json:"session"`
-	Dir     string          `json:"dir"`
-	Name    string          `json:"name"`
-	Command string          `json:"command"`
-	Cols    json.RawMessage `json:"cols"`
-	Rows    json.RawMessage `json:"rows"`
-	Stream  json.RawMessage `json:"stream"`
+	Host        string          `json:"host"`
+	Session     string          `json:"session"`
+	Dir         string          `json:"dir"`
+	Name        string          `json:"name"`
+	Target      string          `json:"target"`
+	Fingerprint string          `json:"fingerprint"`
+	Command     string          `json:"command"`
+	Cols        json.RawMessage `json:"cols"`
+	Rows        json.RawMessage `json:"rows"`
+	Stream      json.RawMessage `json:"stream"`
 }
 
 var methods = map[string]bool{
-	"hosts.list": true, "sessions.list": true, "sessions.create": true,
+	"hosts.list": true, "hosts.add": true, "hosts.remove": true, "hosts.connect": true,
+	"hosts.trustKey": true, "sessions.list": true, "sessions.create": true,
 	"sessions.kill": true, "sessions.rename": true,
 	"term.attach": true, "term.resize": true, "term.detach": true,
 }
@@ -354,7 +471,7 @@ func (cn *conn) backend(host string) (session.Backend, error) {
 	if err := need("host", host); err != nil {
 		return nil, err
 	}
-	b, ok := cn.s.byID[host]
+	b, ok := cn.s.hm.Backend(host)
 	if !ok {
 		return nil, notFound("unknown host: " + host)
 	}
@@ -377,12 +494,8 @@ func (cn *conn) streamParam(raw json.RawMessage) (*stream, error) {
 
 func (cn *conn) call(method string, id int64, p *params) (any, error) {
 	ctx := cn.ctx
-	if method == "hosts.list" {
-		hosts := make([]session.Host, 0, len(cn.s.backends))
-		for _, b := range cn.s.backends {
-			hosts = append(hosts, b.Host(ctx))
-		}
-		return hosts, nil
+	if strings.HasPrefix(method, "hosts.") {
+		return cn.hostsCall(method, p)
 	}
 	if method == "term.resize" || method == "term.detach" {
 		st, err := cn.streamParam(p.Stream)
@@ -463,6 +576,51 @@ func (cn *conn) call(method string, id int64, p *params) (any, error) {
 		return &attachResult{Stream: st.id, st: st}, nil
 	}
 	return nil, errors.New("unhandled method")
+}
+
+func (cn *conn) hostsCall(method string, p *params) (any, error) {
+	ctx := cn.ctx
+	hm := cn.s.hm
+	switch method {
+	case "hosts.list":
+		bs := hm.Backends()
+		hosts := make([]session.Host, 0, len(bs))
+		for _, b := range bs {
+			hosts = append(hosts, b.Host(ctx))
+		}
+		return hosts, nil
+	case "hosts.add":
+		if err := need("target", p.Target); err != nil {
+			return nil, err
+		}
+		return orErr2(hm.Add(ctx, p.Target, p.Name))
+	case "hosts.remove":
+		if err := need("host", p.Host); err != nil {
+			return nil, err
+		}
+		return nil, hm.Remove(ctx, p.Host)
+	case "hosts.connect":
+		if err := need("host", p.Host); err != nil {
+			return nil, err
+		}
+		return nil, hm.Connect(ctx, p.Host)
+	case "hosts.trustKey":
+		if err := need("host", p.Host); err != nil {
+			return nil, err
+		}
+		if err := need("fingerprint", p.Fingerprint); err != nil {
+			return nil, err
+		}
+		return nil, hm.TrustHostKey(ctx, p.Host, p.Fingerprint)
+	}
+	return nil, errors.New("unhandled method")
+}
+
+func orErr2(v session.Host, err error) (any, error) {
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 func orErr(v session.Session, err error) (any, error) {

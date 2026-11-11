@@ -1,3 +1,4 @@
+import { AddHostDialog } from './AddHostDialog'
 import { CoreProvider, useCore } from './CoreContext'
 import { NewTerminalDialog } from './NewTerminalDialog'
 import { Sidebar } from './Sidebar'
@@ -15,12 +16,15 @@ function Main(): React.JSX.Element {
             key={`${active.host}/${active.session}`}
             host={active.host}
             sessionId={active.session}
+            hostName={state.hosts.find((h) => h.id === active.host)?.name ?? active.host}
+            hostConnected={state.hosts.find((h) => h.id === active.host)?.state === 'connected'}
             session={state.sessions[active.host]?.find((s) => s.id === active.session)}
           />
         ) : (
           <p className="muted">Select or create a session</p>
         )}
       </main>
+      {state.addHostOpen && <AddHostDialog />}
       {state.dialog && <NewTerminalDialog preferredHost={state.dialog.host} />}
     </div>
   )

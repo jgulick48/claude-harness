@@ -49,8 +49,22 @@ The core uses the local tmux server by default. For development and tests you ca
 | `HARNESS_TMUX_BIN` | tmux binary to run (default: `tmux` on `PATH`) |
 | `HARNESS_TMUX_SOCKET` | use a separate tmux server, passed as `tmux -L <name>` |
 | `HARNESS_TMUX_CONFIG` | tmux config file, passed as `-f` (e.g. `/dev/null`) |
+| `HARNESS_HOSTS_FILE` | saved SSH hosts (default `<user config dir>/claude-harness/hosts.json`) |
+| `HARNESS_SSH_CONFIG` | ssh config file (default `~/.ssh/config`) |
+| `HARNESS_KNOWN_HOSTS` | known_hosts file (default `~/.ssh/known_hosts`) |
 
 The test suites always use a private socket and `/dev/null` config, so they never touch your real tmux sessions.
+
+## SSH hosts
+
+Click the server icon in the sidebar header and enter an `~/.ssh/config` alias or `user@host[:port]`. The app uses your existing SSH setup:
+
+- **Keys** come from your SSH agent: `ssh-agent`/`SSH_AUTH_SOCK` on macOS and Linux, **Pageant** on Windows. On macOS and Linux, unencrypted key files (`IdentityFile`, `~/.ssh/id_*`) also work. Passphrase-protected keys must be loaded into the agent (`ssh-add`).
+- **`~/.ssh/config`**: `HostName`, `User`, `Port`, `IdentityFile` and `ProxyJump` are honored.
+- **Host keys** are checked against `~/.ssh/known_hosts`. On the first connection, the app shows the key's fingerprint and only trusts it when you confirm. A changed key is refused.
+- The remote host needs **tmux 3.2 or newer**. Homebrew's tmux is found even when it's only on the login-shell `PATH`.
+
+Saved hosts live in `hosts.json` in the app's config directory (`~/.config/claude-harness/` on Linux, `~/Library/Application Support/claude-harness/` on macOS, `%AppData%\claude-harness\` on Windows). Removing a host leaves its tmux sessions running on that machine.
 
 ## Releases & updates
 

@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -43,10 +43,18 @@ function openWS(url: string): Promise<{ ws: WebSocket; next: () => Promise<any> 
 // Every test core gets a private tmux socket and no tmux config, so tests never
 // touch the user's real tmux server (connecting subscribes to session lists).
 const isolatedSocket = `harness-uitest-basic-${process.pid}`
-const isolatedEnv = { HARNESS_TMUX_SOCKET: isolatedSocket, HARNESS_TMUX_CONFIG: '/dev/null' }
+// The hosts file lives in a fresh temp dir so tests never read the real one.
+const hostsDir = mkdtempSync(join(tmpdir(), 'harness-uitest-hosts-'))
+const hostsFile = join(hostsDir, 'hosts.json')
+afterAll(() => rmSync(hostsDir, { recursive: true, force: true }))
+const isolatedEnv = {
+  HARNESS_TMUX_SOCKET: isolatedSocket,
+  HARNESS_TMUX_CONFIG: '/dev/null',
+  HARNESS_HOSTS_FILE: hostsFile
+}
 
 describe.skipIf(!exists)('harness-core integration', () => {
-  it('starts, speaks protocol v2, and stops cleanly', async () => {
+  it('starts, speaks protocol v3, and stops cleanly', async () => {
     const logs: string[] = []
     const core = await startCore(corePath, { logger: (l) => logs.push(l), env: isolatedEnv })
     let exitCode: number | null | undefined
@@ -57,18 +65,24 @@ describe.skipIf(!exists)('harness-core integration', () => {
       })
     )
     try {
-      expect(core.info.protocol).toBe(2)
+      expect(core.info.protocol).toBe(3)
       expect(core.info.version).toBeTruthy()
       expect(core.info.url).toBe(`ws://127.0.0.1:${core.info.port}/ws`)
 
       const { ws, next } = await openWS(`${core.info.url}?token=${core.info.token}`)
       const hello = await next()
-      expect(hello).toMatchObject({ type: 'hello', protocol: 2, version: core.info.version })
+      expect(hello).toMatchObject({ type: 'hello', protocol: 3, version: core.info.version })
       ws.send(JSON.stringify({ type: 'ping', id: 7 }))
-      // Events (e.g. the initial sessions.changed) may arrive first; skip them.
+      // Events (the initial hosts.changed and sessions.changed) may arrive first.
+      const events: any[] = []
       let reply = await next()
-      while (reply.type === 'event') reply = await next()
+      while (reply.type === 'event') {
+        events.push(reply)
+        reply = await next()
+      }
       expect(reply).toEqual({ type: 'pong', id: 7 })
+      const hc = events.find((e) => e.event === 'hosts.changed')
+      expect(hc?.hosts?.[0]).toMatchObject({ id: 'local', kind: 'local' })
       ws.close()
 
       // wrong token is rejected before upgrade
@@ -201,7 +215,7 @@ describe.skipIf(!exists || !hasTmux)('harness-core tmux scenario', () => {
 
   it('creates a session, attaches, runs a command, detaches and kills', async () => {
     const core = await startCore(corePath, {
-      env: { HARNESS_TMUX_SOCKET: socket, HARNESS_TMUX_CONFIG: '/dev/null', SHELL: '/bin/sh' }
+      env: { HARNESS_TMUX_SOCKET: socket, HARNESS_TMUX_CONFIG: '/dev/null', HARNESS_HOSTS_FILE: hostsFile, SHELL: '/bin/sh' }
     })
     try {
       const c = await connect(`${core.info.url}?token=${core.info.token}`)

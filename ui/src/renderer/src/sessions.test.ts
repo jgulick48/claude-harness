@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { displayPath, sessionLabel, sortSessions, truncateMiddle, type Session } from './sessions'
+import { canCreateOn, canReconnect, closedMessage, hostStatusText, trustKeyParams, displayPath, sessionLabel, sortSessions, truncateMiddle, type Session } from './sessions'
 
 const mk = (o: Partial<Session>): Session => ({
   id: '$1', name: 'h-x-1', harnessName: '', managed: true, cwd: '', windows: 1, attached: 0, created: 0, ...o
@@ -58,5 +58,36 @@ describe('sortSessions', () => {
   it('breaks ties by numeric id', () => {
     const r = sortSessions([mk({ id: '$10', created: 1 }), mk({ id: '$9', created: 1 })])
     expect(r.map((s) => s.id)).toEqual(['$9', '$10'])
+  })
+})
+
+describe('host helpers', () => {
+  const states = ['connected', 'connecting', 'disconnected', 'unavailable', 'host_key_unknown', 'error'] as const
+  it('hostStatusText', () => {
+    expect(hostStatusText({ state: 'connected' })).toBe('')
+    expect(hostStatusText({ state: 'connecting' })).toBe('Connecting…')
+    expect(hostStatusText({ state: 'unavailable', error: 'tmux not found on devbox' })).toBe('tmux not found on devbox')
+    expect(hostStatusText({ state: 'disconnected', error: 'connection lost' })).toBe('connection lost')
+    expect(hostStatusText({ state: 'error' })).toBe('Connection error')
+  })
+  it('canCreateOn only when connected', () => {
+    expect(states.filter((state) => canCreateOn({ state }))).toEqual(['connected'])
+  })
+  it('canReconnect only for ssh disconnected/error', () => {
+    expect(states.filter((state) => canReconnect({ kind: 'ssh', state }))).toEqual(['disconnected', 'error'])
+    expect(canReconnect({ kind: 'local', state: 'error' })).toBe(false)
+  })
+  it('trustKeyParams sends exactly the displayed fingerprint', () => {
+    const hostKey = { address: 'devbox.lan', keyType: 'ssh-ed25519', fingerprint: 'SHA256:abc/+=' }
+    expect(trustKeyParams({ id: 'devbox', state: 'host_key_unknown', hostKey })).toEqual({
+      host: 'devbox',
+      fingerprint: 'SHA256:abc/+='
+    })
+    expect(trustKeyParams({ id: 'devbox', state: 'connected', hostKey })).toBeNull()
+    expect(trustKeyParams({ id: 'devbox', state: 'host_key_unknown' })).toBeNull()
+  })
+  it('closedMessage', () => {
+    expect(closedMessage('connection lost', 'devbox')).toBe('Connection to devbox lost')
+    expect(closedMessage('session ended', 'devbox')).toBe('Session ended')
   })
 })

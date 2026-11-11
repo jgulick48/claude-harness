@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Session } from './sessions'
+import type { Host, Session } from './sessions'
 import { initialState, reducer } from './store'
 
 const s = (id: string, name = 'n'): Session => ({
@@ -25,5 +25,44 @@ describe('store reducer', () => {
     expect(st.dialog).toEqual({ host: 'local' })
     st = reducer(st, { type: 'closeDialog' })
     expect(st.dialog).toBeNull()
+  })
+  describe('hosts.changed', () => {
+    const h = (id: string, state: Host['state'] = 'connected'): Host => ({
+      id, name: id, kind: id === 'local' ? 'local' : 'ssh', state
+    })
+    it('adds hosts and updates state', () => {
+      let st = reducer(initialState, { type: 'hosts', hosts: [h('local')] })
+      st = reducer(st, { type: 'hosts', hosts: [h('local'), h('dev', 'connecting')] })
+      expect(st.hosts.map((x) => x.id)).toEqual(['local', 'dev'])
+      st = reducer(st, { type: 'hosts', hosts: [h('local'), h('dev', 'connected')] })
+      expect(st.hosts[1].state).toBe('connected')
+    })
+    it('drops sessions of removed hosts and keeps the active view of others', () => {
+      let st = reducer(initialState, { type: 'hosts', hosts: [h('local'), h('dev')] })
+      st = reducer(st, { type: 'sessions', host: 'dev', sessions: [s('$1')] })
+      st = reducer(st, { type: 'sessions', host: 'local', sessions: [s('$2')] })
+      st = reducer(st, { type: 'attach', ref: { host: 'local', session: '$2' } })
+      st = reducer(st, { type: 'hosts', hosts: [h('local')] })
+      expect(Object.keys(st.sessions)).toEqual(['local'])
+      expect(st.active).toEqual({ host: 'local', session: '$2' })
+    })
+    it('clears the active view when its host is removed', () => {
+      let st = reducer(initialState, { type: 'hosts', hosts: [h('local'), h('dev')] })
+      st = reducer(st, { type: 'attach', ref: { host: 'dev', session: '$1' } })
+      st = reducer(st, { type: 'hosts', hosts: [h('local')] })
+      expect(st.active).toBeNull()
+    })
+    it('keeps the active view when its host merely disconnects', () => {
+      let st = reducer(initialState, { type: 'hosts', hosts: [h('dev')] })
+      st = reducer(st, { type: 'attach', ref: { host: 'dev', session: '$1' } })
+      st = reducer(st, { type: 'hosts', hosts: [h('dev', 'disconnected')] })
+      expect(st.active).toEqual({ host: 'dev', session: '$1' })
+    })
+  })
+  it('add-host dialog toggles', () => {
+    let st = reducer(initialState, { type: 'openAddHost' })
+    expect(st.addHostOpen).toBe(true)
+    st = reducer(st, { type: 'closeAddHost' })
+    expect(st.addHostOpen).toBe(false)
   })
 })

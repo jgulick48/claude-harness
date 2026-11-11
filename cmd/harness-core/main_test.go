@@ -5,17 +5,68 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jgulick48/claude-harness/internal/session"
 	"github.com/jgulick48/claude-harness/internal/version"
 )
 
-func env(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+// testHostsFile keeps tests away from the real hosts file.
+var testHostsFile string
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "harness-core-test")
+	if err != nil {
+		panic(err)
+	}
+	testHostsFile = filepath.Join(dir, "hosts.json")
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+func env(m map[string]string) func(string) string {
+	return func(k string) string {
+		if v, ok := m[k]; ok {
+			return v
+		}
+		if k == "HARNESS_HOSTS_FILE" {
+			return testHostsFile
+		}
+		return ""
+	}
+}
+
+func TestCorruptHostsFileFallsBackToLocal(t *testing.T) {
+	bad := filepath.Join(t.TempDir(), "hosts.json")
+	if err := os.WriteFile(bad, []byte("{garbage"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	hm := newHostManager(slog.New(slog.NewTextHandler(&logs, nil)), env(map[string]string{"HARNESS_HOSTS_FILE": bad}))
+	defer hm.Close()
+	if bs := hm.Backends(); len(bs) != 1 || bs[0].ID() != "local" {
+		t.Fatalf("backends %v", bs)
+	}
+	if _, err := hm.Add(context.Background(), "x", ""); !errors.Is(err, session.ErrUnavailable) {
+		t.Fatalf("add: %v", err)
+	}
+	if !strings.Contains(logs.String(), "corrupt") {
+		t.Fatalf("log: %s", logs.String())
+	}
+	if got, _ := os.ReadFile(bad); string(got) != "{garbage" {
+		t.Fatal("corrupt file was modified")
+	}
+}
 
 func TestRunExitCodes(t *testing.T) {
 	tests := []struct {
@@ -75,7 +126,7 @@ func TestRunHappyPath(t *testing.T) {
 	if err := json.Unmarshal([]byte(line), &ready); err != nil {
 		t.Fatal(err)
 	}
-	if ready.Type != "ready" || ready.Port == 0 || ready.Protocol != 2 || ready.Version != version.Version {
+	if ready.Type != "ready" || ready.Port == 0 || ready.Protocol != 3 || ready.Version != version.Version {
 		t.Fatalf("ready: %+v", ready)
 	}
 	go io.Copy(io.Discard, stdoutR)

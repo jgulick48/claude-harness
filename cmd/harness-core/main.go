@@ -72,8 +72,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	addr := ln.Addr().(*net.TCPAddr)
 
-	backends := newBackends(logger, getenv)
-	srv := &http.Server{Handler: api.NewServer(token, logger, backends), ReadHeaderTimeout: 10 * time.Second}
+	hm := newHostManager(logger, getenv)
+	srv := &http.Server{Handler: api.NewServer(token, logger, hm), ReadHeaderTimeout: 10 * time.Second}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(ln) }()
 
@@ -101,9 +101,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		logger.Info("shutting down", "reason", "stdin closed")
 	case err := <-serveErr:
 		logger.Error("server failed", "err", err)
-		for _, b := range backends {
-			_ = b.Close()
-		}
+		_ = hm.Close()
 		return 1
 	}
 
@@ -114,10 +112,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		logger.Warn("graceful shutdown incomplete", "err", err)
 		_ = srv.Close()
 	}
-	for _, b := range backends {
-		if err := b.Close(); err != nil {
-			logger.Warn("backend close failed", "host", b.ID(), "err", err)
-		}
+	if err := hm.Close(); err != nil {
+		logger.Warn("host manager close failed", "err", err)
 	}
 	return code
 }

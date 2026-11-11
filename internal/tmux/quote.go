@@ -9,3 +9,11 @@ import "strings"
 func Quote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
+
+// ShellQuote quotes s as one POSIX shell word using single quotes. Every byte
+// is literal inside single quotes, including the \x1f field separator and
+// newlines. An embedded single quote is written as close, backslash-quote,
+// reopen; the empty string becomes an empty quoted pair.
+func ShellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
