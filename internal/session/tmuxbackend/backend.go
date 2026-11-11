@@ -104,12 +104,11 @@ func (o localOps) homeDir(context.Context) (string, error) { return o.home, nil 
 
 // gate returns an ErrUnavailable error when the backend can't serve requests.
 func (b *Backend) gate() error {
-	if b.lostCh != nil {
-		select {
-		case <-b.lostCh:
-			return fmt.Errorf("%w: connection lost", session.ErrUnavailable)
-		default:
-		}
+	// isLost, not just lostCh: lostCh is closed by a goroutine a moment after
+	// the SSH client's Done channel, and in between a request would hit the
+	// dead connection and return a raw "use of closed network connection".
+	if b.isLost() {
+		return fmt.Errorf("%w: connection lost", session.ErrUnavailable)
 	}
 	if b.noTmux != "" {
 		return fmt.Errorf("%w: %s", session.ErrUnavailable, b.noTmux)
@@ -122,12 +121,8 @@ func (b *Backend) mapError(err error, id string) error {
 	if err == nil {
 		return nil
 	}
-	if b.lostCh != nil {
-		select {
-		case <-b.lostCh:
-			return fmt.Errorf("%w: connection lost", session.ErrUnavailable)
-		default:
-		}
+	if b.isLost() {
+		return fmt.Errorf("%w: connection lost", session.ErrUnavailable)
 	}
 	return mapErr(err, id)
 }
@@ -168,13 +163,9 @@ func (b *Backend) Host(ctx context.Context) session.Host {
 		return b.hostCache
 	}
 	h := session.Host{ID: b.id, Name: b.name, Kind: b.kind, Home: b.home, State: session.HostConnected}
-	if b.lostCh != nil {
-		select {
-		case <-b.lostCh:
-			h.State, h.Error = session.HostDisconnected, "connection lost"
-			return h
-		default:
-		}
+	if b.isLost() {
+		h.State, h.Error = session.HostDisconnected, "connection lost"
+		return h
 	}
 	if b.noTmux != "" {
 		h.State, h.Error = session.HostUnavailable, b.noTmux

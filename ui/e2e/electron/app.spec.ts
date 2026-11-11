@@ -98,8 +98,9 @@ test('paste from the system clipboard reaches the terminal', async () => {
   await page.keyboard.type('cat -v')
   await page.keyboard.press('Enter')
   const combos = process.platform === 'darwin' ? ['Meta+V'] : ['Control+V', 'Control+Shift+V', 'Shift+Insert']
+  const pasted = (i: number): string => `paste-ok-${i}-${combos[i].replace(/\W/g, '')}`
   for (const [i, combo] of combos.entries()) {
-    const text = `paste-ok-${i}-${combo.replace(/\W/g, '')}`
+    const text = pasted(i)
     await app.evaluate(({ clipboard }, t) => clipboard.writeText(t), text)
     await page.keyboard.press(combo)
     await page.keyboard.press('Enter')
@@ -117,11 +118,11 @@ test('paste from the system clipboard reaches the terminal', async () => {
   await app.evaluate(({ clipboard }) => clipboard.writeText('stale'))
   // xterm puts a transparent layer over its rows (that's what handles the
   // mouse), so double-click at the word's position like a user would.
-  const box = await rows.getByText('paste-ok-0-ControlV', { exact: true }).first().boundingBox()
+  const box = await rows.getByText(pasted(0), { exact: true }).first().boundingBox()
   if (!box) throw new Error('pasted text not on screen')
   await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2)
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+C' : 'Control+Shift+C')
-  await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe('paste-ok-0-ControlV')
+  await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(pasted(0))
 })
 
 test('Check for Updates… reports that updates are unavailable in an unpackaged build', async () => {
