@@ -10,8 +10,18 @@ import (
 
 // Host states.
 const (
-	HostConnected   = "connected"
-	HostUnavailable = "unavailable" // e.g. tmux missing or older than 3.2
+	HostConnected    = "connected"
+	HostConnecting   = "connecting"
+	HostDisconnected = "disconnected"     // SSH connection dropped or not yet attempted; Error says why
+	HostUnavailable  = "unavailable"      // reachable, but tmux missing or older than 3.2
+	HostKeyUnknown   = "host_key_unknown" // first connection: HostKey must be trusted by the user
+	HostError        = "error"            // connect failed (auth, DNS, changed host key, ...); Error says why
+)
+
+// Host kinds.
+const (
+	KindLocal = "local"
+	KindSSH   = "ssh"
 )
 
 // Commands accepted by CreateOptions.Command.
@@ -34,12 +44,23 @@ var (
 
 // Host describes one machine and its tmux server.
 type Host struct {
-	ID          string `json:"id"`   // "local" in M1
-	Name        string `json:"name"` // display name, e.g. "This computer"
+	ID          string `json:"id"`               // "local", or a slug for SSH hosts (e.g. "devbox")
+	Name        string `json:"name"`             // display name, e.g. "This computer", "devbox"
+	Kind        string `json:"kind"`             // KindLocal or KindSSH
+	Target      string `json:"target,omitempty"` // SSH: what the user entered (alias or user@host[:port])
 	State       string `json:"state"`
 	Error       string `json:"error,omitempty"`
 	Home        string `json:"home,omitempty"` // $HOME on that host, for "~" display
 	TmuxVersion string `json:"tmuxVersion,omitempty"`
+	// HostKey is set when State == HostKeyUnknown.
+	HostKey *HostKeyPrompt `json:"hostKey,omitempty"`
+}
+
+// HostKeyPrompt describes an unknown SSH host key awaiting the user's decision.
+type HostKeyPrompt struct {
+	Address     string `json:"address"`     // known_hosts name, e.g. "devbox.lan" or "[devbox.lan]:2222"
+	KeyType     string `json:"keyType"`     // e.g. "ssh-ed25519"
+	Fingerprint string `json:"fingerprint"` // "SHA256:..."
 }
 
 // Session is one tmux session.
@@ -95,4 +116,29 @@ type Terminal interface {
 	// Err reports why Output closed: nil after Close, otherwise the reason
 	// (e.g. "session ended").
 	Err() error
+}
+
+// HostManager owns the set of hosts (local + configured SSH hosts), their
+// persistence, and connection lifecycle. The API serves whatever it holds.
+type HostManager interface {
+	// Backends returns the current backends, local first, then SSH hosts in
+	// the order they were added.
+	Backends() []Backend
+	Backend(id string) (Backend, bool)
+	// Add saves a new SSH host and starts connecting in the background.
+	// target is an ~/.ssh/config alias or user@host[:port]; name is optional
+	// (default: the target's host part). Duplicate targets wrap ErrBadRequest.
+	Add(ctx context.Context, target, name string) (Host, error)
+	// Remove disconnects and forgets an SSH host ("local" can't be removed:
+	// ErrBadRequest). Its tmux sessions keep running on the host.
+	Remove(ctx context.Context, id string) error
+	// Connect (re)connects a host that is disconnected or in error.
+	Connect(ctx context.Context, id string) error
+	// TrustHostKey appends the pending key to known_hosts and reconnects.
+	// fingerprint must equal the pending HostKey.Fingerprint (else ErrBadRequest).
+	TrustHostKey(ctx context.Context, id, fingerprint string) error
+	// Subscribe calls fn with all hosts now and whenever any host's info or
+	// the set of hosts changes. Callbacks must not block.
+	Subscribe(fn func([]Host)) (unsubscribe func())
+	Close() error
 }

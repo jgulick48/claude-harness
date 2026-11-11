@@ -1,7 +1,7 @@
 # Core ↔ UI protocol
 
 How the Electron app launches `harness-core` and talks to it. See
-[ARCHITECTURE.md](ARCHITECTURE.md) §3 and §7 for background. Protocol version: **2** (v2 adds requests/results, events, sessions and terminals; M1).
+[ARCHITECTURE.md](ARCHITECTURE.md) §3 and §7 for background. Protocol version: **3** (v2 added requests/results, events, sessions and terminals in M1; v3 adds SSH host management in M2).
 
 ## 1. Launch
 
@@ -19,7 +19,7 @@ How the Electron app launches `harness-core` and talks to it. See
    **exactly one line** to stdout, then nothing else to stdout:
 
    ```json
-   {"type":"ready","addr":"127.0.0.1:54321","port":54321,"version":"0.1.0-dev","protocol":2}
+   {"type":"ready","addr":"127.0.0.1:54321","port":54321,"version":"0.1.0-dev","protocol":3}
    ```
 
 4. All logs go to **stderr** (`log/slog` text format). The UI forwards them to
@@ -52,7 +52,7 @@ compared in constant time.
 
 | Endpoint | Auth | Response |
 |---|---|---|
-| `GET /healthz` | Header `Authorization: Bearer <token>` | `200 {"ok":true,"version":"…","protocol":2}`; `401` if the token is missing or wrong |
+| `GET /healthz` | Header `Authorization: Bearer <token>` | `200 {"ok":true,"version":"…","protocol":3}`; `401` if the token is missing or wrong |
 | `GET /ws?token=<token>` | Query parameter (browser WebSockets can't set headers) | WebSocket upgrade; `401` **before** upgrade if the token is missing or wrong |
 
 The WebSocket server doesn't check the Origin header, because the Electron
@@ -68,7 +68,7 @@ Control messages are JSON in **text** frames. Terminal data travels in
 
 | Direction | Message | Notes |
 |---|---|---|
-| core → UI | `{"type":"hello","version":"0.1.0-dev","protocol":2}` | Sent right after connecting |
+| core → UI | `{"type":"hello","version":"0.1.0-dev","protocol":3}` | Sent right after connecting |
 | UI → core | `{"type":"ping","id":1}` | `id` is an integer chosen by the client |
 | core → UI | `{"type":"pong","id":1}` | Echoes the `id` |
 | core → UI | `{"type":"error","id":1,"message":"…"}` | Reply to a failed request, or to an unknown `type`. `id` is echoed if the request had one, otherwise omitted. The connection stays open. |
@@ -96,19 +96,33 @@ Events are pushed by core and have no `id`: `{"type":"event","event":"<name>", .
 The objects mirror `internal/session` (`Host`, `Session`):
 
 ```json
-Host:    {"id":"local","name":"This computer","state":"connected","home":"/home/me","tmuxVersion":"3.2a"}
-         state: "connected" | "unavailable" (+ "error": "tmux not found")
+Host:    {"id":"local","name":"This computer","kind":"local","state":"connected","home":"/home/me","tmuxVersion":"3.2a"}
+         {"id":"devbox","name":"devbox","kind":"ssh","target":"me@devbox.lan","state":"host_key_unknown",
+          "hostKey":{"address":"devbox.lan","keyType":"ssh-ed25519","fingerprint":"SHA256:…"}}
+         state: "connected" | "connecting" | "disconnected" | "unavailable" | "host_key_unknown" | "error"
+         ("error" carries the reason for disconnected / unavailable / error)
 Session: {"id":"$3","name":"h-api-1","harnessName":"","managed":true,"cwd":"/home/me/work/api",
           "windows":1,"attached":0,"created":1794420293}
 ```
 
 | Method | Params | Result |
 |---|---|---|
-| `hosts.list` | none | `[Host]`. M1 has only `local`. |
+| `hosts.list` | none | `[Host]`: `local` first, then SSH hosts in the order added. |
+| `hosts.add` | `target` (an `~/.ssh/config` alias or `user@host[:port]`), `name` (optional) | `Host`. The host is saved and starts connecting in the background; follow `hosts.changed`. |
+| `hosts.remove` | `host` | `null`. Disconnects and forgets the host. Its tmux sessions keep running there. `local` can't be removed. |
+| `hosts.connect` | `host` | `null`. Reconnects a host that is `disconnected` or in `error`. |
+| `hosts.trustKey` | `host`, `fingerprint` | `null`. Adds the pending host key to `~/.ssh/known_hosts` and reconnects. `fingerprint` must match `hostKey.fingerprint`; this guards against a key changing between the prompt and the click. |
 | `sessions.list` | `host` | `[Session]` |
 | `sessions.create` | `host`, `dir` (optional, `~` allowed, default home), `name` (optional), `command` (`"shell"` default or `"claude"`) | `Session` |
 | `sessions.kill` | `host`, `session` | `null` |
 | `sessions.rename` | `host`, `session`, `name` (`""` clears it) | `null`. Sets the display name only. |
+
+Event `hosts.changed`, pushed on connect and whenever any host's info or the
+set of hosts changes: `{"type":"event","event":"hosts.changed","hosts":[Host]}`.
+
+A host whose connection drops ends its open streams with `term.closed`, reason
+`"connection lost"`. Its sessions are still running on the host; reattach after
+`hosts.connect`.
 
 Event `sessions.changed`, pushed on connect for each host and whenever that
 host's list changes:
