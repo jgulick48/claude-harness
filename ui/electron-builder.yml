@@ -13,11 +13,24 @@ extraResources:
     filter:
       - harness-core
       - harness-core.exe
+artifactName: claude-harness-${version}-${os}-${arch}.${ext}
 mac:
-  target: dmg
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
 win:
-  target: nsis
+  target:
+    - target: nsis
+      arch: [x64]
 linux:
-  target: AppImage
+  target:
+    - target: AppImage
+      arch: [x64]
   category: Development
-publish: null
+publish:
+  provider: github
+  owner: jgulick48
+  repo: claude-harness
+  releaseType: draft

@@ -1,6 +1,8 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, shell, type MenuItemConstructorOptions } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { join } from 'node:path'
 import { resolveCorePath, startCore, type CoreInfo, type RunningCore } from './core'
+import { UpdateController } from './updater'
 
 type CoreStatus =
   | { state: 'starting' }
@@ -13,6 +15,80 @@ let core: RunningCore | null = null
 let coreInfo: CoreInfo | { error: string } | null = null
 let status: CoreStatus = { state: 'starting' }
 let quitting = false
+let updates: UpdateController | null = null
+
+/** Gracefully stop the Go core (same path as before-quit) so an installer can replace its files. */
+async function stopCoreForQuit(): Promise<void> {
+  quitting = true
+  const c = core
+  core = null
+  if (c) await c.stop().catch(() => {})
+}
+
+function updatesSupported(): boolean {
+  if (!app.isPackaged) return false
+  if (process.env.HARNESS_DISABLE_UPDATES === '1') return false
+  if (process.platform === 'linux' && !process.env.APPIMAGE) return false
+  return true
+}
+
+function setupUpdates(): UpdateController {
+  const log = (m: string): void => console.log(`[updater] ${m}`)
+  autoUpdater.logger = { info: log, warn: log, error: log, debug: () => {} }
+  const ctl = new UpdateController({
+    updater: autoUpdater,
+    platform: process.platform,
+    supported: updatesSupported(),
+    openExternal: (url) => shell.openExternal(url),
+    beforeInstall: stopCoreForQuit,
+    onInstallFailed: () => {
+      // The core was stopped for the installer; bring it back since we're staying open.
+      quitting = false
+      void launchCore()
+    },
+    log
+  })
+  ctl.onState((s) => mainWindow?.webContents.send('update:status', s))
+  ipcMain.handle('update:check', () => ctl.check({ manual: true }))
+  ipcMain.handle('update:install', () => ctl.install())
+  ipcMain.handle('update:download', () => ctl.openDownload())
+  return ctl
+}
+
+function buildMenu(): void {
+  const isMac = process.platform === 'darwin'
+  const checkItem: MenuItemConstructorOptions = {
+    label: 'Check for Updates…',
+    click: () => void updates?.check({ manual: true })
+  }
+  const template: MenuItemConstructorOptions[] = [
+    ...(isMac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: 'about' },
+              checkItem,
+              { type: 'separator' },
+              { role: 'services' },
+              { type: 'separator' },
+              { role: 'hide' },
+              { role: 'hideOthers' },
+              { role: 'unhide' },
+              { type: 'separator' },
+              { role: 'quit' }
+            ]
+          } as MenuItemConstructorOptions
+        ]
+      : []),
+    { role: 'fileMenu' },
+    { role: 'editMenu' },
+    { role: 'viewMenu' },
+    { role: 'windowMenu' },
+    { role: 'help', submenu: isMac ? [] : [checkItem] }
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
 
 function setStatus(s: CoreStatus): void {
   status = s
@@ -39,7 +115,10 @@ function createWindow(): void {
     if (/^https?:/.test(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
-  mainWindow.webContents.on('did-finish-load', () => mainWindow?.webContents.send('core:status', status))
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow?.webContents.send('core:status', status)
+    if (updates) mainWindow?.webContents.send('update:status', updates.state)
+  })
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -75,8 +154,11 @@ async function launchCore(): Promise<void> {
 ipcMain.handle('core:info', () => coreInfo ?? { error: 'core is not started yet' })
 
 app.whenReady().then(() => {
+  updates = setupUpdates()
+  buildMenu()
   createWindow()
   void launchCore()
+  updates.start()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -87,12 +169,8 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', (event) => {
+  updates?.stop()
   if (quitting || !core) return
   event.preventDefault()
-  quitting = true
-  const c = core
-  core = null
-  c.stop()
-    .catch(() => {})
-    .finally(() => app.quit())
+  void stopCoreForQuit().finally(() => app.quit())
 })

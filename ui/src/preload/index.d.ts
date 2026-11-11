@@ -12,9 +12,23 @@ export type CoreStatus =
   | { state: 'error'; message: string }
   | { state: 'exited'; code: number | null }
 
+export type UpdateStatus =
+  | { state: 'unsupported'; manual?: boolean }
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | { state: 'available'; version: string; manualDownload?: boolean }
+  | { state: 'downloading'; version: string; percent: number }
+  | { state: 'ready'; version: string }
+  | { state: 'up-to-date' }
+  | { state: 'error'; message: string }
+
 export interface HarnessApi {
   getCoreInfo(): Promise<CoreInfo | { error: string }>
   onCoreStatus(cb: (s: CoreStatus) => void): () => void
+  onUpdateStatus(cb: (s: UpdateStatus) => void): () => void
+  checkForUpdates(): Promise<void>
+  installUpdate(): Promise<void>
+  downloadUpdate(): Promise<void>
 }
 
 declare global {

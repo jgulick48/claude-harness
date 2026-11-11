@@ -41,3 +41,11 @@ make help         # list all targets
 ```
 
 The app launches the core binary from `bin/`. Set `HARNESS_CORE_PATH` to override the core binary path the app uses.
+
+## Releases & updates
+
+To cut a release: bump `version` in `ui/package.json`, commit, tag `vX.Y.Z` (matching that version) and push the tag. The Release workflow builds installers for macOS (dmg/zip, arm64 + x64), Windows (NSIS) and Linux (AppImage) and publishes them to GitHub Releases.
+
+Installed apps check for updates shortly after startup and every 4 hours (also via **Check for Updates…**). Windows and Linux (AppImage) download updates in the background and offer **Restart to install** (otherwise the update installs on next quit). Set `HARNESS_DISABLE_UPDATES=1` to turn update checks off.
+
+macOS builds are unsigned (no Apple Developer account yet). On first launch use right-click → Open, or run `xattr -cr "/Applications/Claude Harness.app"`. Updates on macOS are manual: the app shows "Update vX available" with a button that opens the GitHub release page.
