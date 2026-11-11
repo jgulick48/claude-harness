@@ -1,0 +1,151 @@
+import { useEffect, useRef, useState } from 'react'
+import { Terminal, type ITheme } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
+import '@xterm/xterm/css/xterm.css'
+import { useCore } from './CoreContext'
+import { sessionLabel, type Session } from './sessions'
+
+function cssVar(name: string, fallback: string): string {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return v || fallback
+}
+
+function readTheme(): ITheme {
+  return {
+    background: cssVar('--term-bg', '#ffffff'),
+    foreground: cssVar('--term-fg', '#1f2328'),
+    cursor: cssVar('--term-cursor', '#1f2328'),
+    selectionBackground: cssVar('--term-selection', '#b6d4fe')
+  }
+}
+
+const FONT = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace'
+
+interface Props {
+  host: string
+  sessionId: string
+  session: Session | undefined
+}
+
+export function TerminalPane({ host, sessionId, session }: Props): React.JSX.Element {
+  const { client, dispatch } = useCore()
+  const boxRef = useRef<HTMLDivElement>(null)
+  const [ended, setEnded] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!client || !boxRef.current) return
+    const box = boxRef.current
+    let disposed = false
+    let stream: number | null = null
+    let offStream: (() => void) | null = null
+    setEnded(null)
+    setError(null)
+
+    const term = new Terminal({
+      fontFamily: FONT,
+      fontSize: 13,
+      cursorBlink: true,
+      scrollback: 5000,
+      theme: readTheme()
+    })
+    const fit = new FitAddon()
+    term.loadAddon(fit)
+    term.loadAddon(new WebLinksAddon((_e, uri) => window.open(uri)))
+    term.open(box)
+    const doFit = (): void => {
+      try {
+        fit.fit()
+      } catch {
+        /* container not laid out yet */
+      }
+    }
+    doFit()
+
+    term.onData((d) => {
+      if (stream !== null) client.sendInput(stream, d)
+    })
+    term.onBinary((d) => {
+      if (stream === null) return
+      const bytes = new Uint8Array(d.length)
+      for (let i = 0; i < d.length; i++) bytes[i] = d.charCodeAt(i) & 0xff
+      client.sendInput(stream, bytes)
+    })
+
+    const offClosed = client.onEvent('term.closed', (ev) => {
+      if (stream !== null && ev.stream === stream) {
+        offStream?.()
+        offStream = null
+        setEnded(String(ev.reason ?? 'session ended'))
+      }
+    })
+
+    client
+      .request<{ stream: number }>('term.attach', { host, session: sessionId, cols: term.cols, rows: term.rows })
+      .then((r) => {
+        // Register synchronously: output frames may follow the result immediately.
+        if (disposed) {
+          client.request('term.detach', { stream: r.stream }).catch(() => {})
+          return
+        }
+        stream = r.stream
+        offStream = client.onStream(r.stream, (d) => term.write(d))
+        term.focus()
+      })
+      .catch((e: Error) => {
+        if (!disposed) setError(e.message)
+      })
+
+    let debounce: ReturnType<typeof setTimeout> | null = null
+    const ro = new ResizeObserver(() => {
+      if (debounce) clearTimeout(debounce)
+      debounce = setTimeout(() => {
+        if (disposed) return
+        const { cols, rows } = term
+        doFit()
+        if (stream !== null && (term.cols !== cols || term.rows !== rows)) {
+          client.request('term.resize', { stream, cols: term.cols, rows: term.rows }).catch(() => {})
+        }
+      }, 100)
+    })
+    ro.observe(box)
+
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onScheme = (): void => {
+      term.options.theme = readTheme()
+    }
+    mq.addEventListener('change', onScheme)
+
+    return () => {
+      disposed = true
+      if (debounce) clearTimeout(debounce)
+      ro.disconnect()
+      mq.removeEventListener('change', onScheme)
+      offClosed()
+      offStream?.()
+      if (stream !== null) client.request('term.detach', { stream }).catch(() => {})
+      term.dispose()
+    }
+  }, [client, host, sessionId])
+
+  return (
+    <div className="term-pane">
+      <header className="term-header">
+        <span className="term-title">{session ? sessionLabel(session) : sessionId}</span>
+        {session && <span className="term-path">{session.cwd}</span>}
+      </header>
+      <div className="term-body">
+        <div className="term-box" ref={boxRef} />
+        {(ended !== null || error !== null) && (
+          <div className="term-overlay">
+            <p>{error !== null ? `Could not attach: ${error}` : 'Session ended'}</p>
+            <button className="btn" autoFocus onClick={() => dispatch({ type: 'attach', ref: null })}>
+              Close
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

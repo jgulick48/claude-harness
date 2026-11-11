@@ -72,7 +72,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	addr := ln.Addr().(*net.TCPAddr)
 
-	srv := &http.Server{Handler: api.NewServer(token, logger), ReadHeaderTimeout: 10 * time.Second}
+	backends := newBackends(logger, getenv)
+	srv := &http.Server{Handler: api.NewServer(token, logger, backends), ReadHeaderTimeout: 10 * time.Second}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(ln) }()
 
@@ -100,6 +101,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		logger.Info("shutting down", "reason", "stdin closed")
 	case err := <-serveErr:
 		logger.Error("server failed", "err", err)
+		for _, b := range backends {
+			_ = b.Close()
+		}
 		return 1
 	}
 
@@ -109,6 +113,11 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		// Hijacked WebSocket connections are not tracked by Shutdown; force close.
 		logger.Warn("graceful shutdown incomplete", "err", err)
 		_ = srv.Close()
+	}
+	for _, b := range backends {
+		if err := b.Close(); err != nil {
+			logger.Warn("backend close failed", "host", b.ID(), "err", err)
+		}
 	}
 	return code
 }

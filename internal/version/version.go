@@ -5,4 +5,4 @@ package version
 var Version = "0.1.0-dev"
 
 // Protocol is the core <-> UI protocol version (see docs/CORE_PROTOCOL.md).
-const Protocol = 1
+const Protocol = 2
