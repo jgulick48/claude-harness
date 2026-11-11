@@ -1,8 +1,8 @@
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { startCore, type RunningCore } from '../../src/main/core'
 import { coreBin, sshtestdBin } from './paths'
 
@@ -102,6 +102,17 @@ export interface IsolatedOpts {
 }
 
 /**
+ * The developer's PATH minus any directory that holds a `claude` binary, so the
+ * setup check sees a host without Claude Code regardless of the dev machine.
+ */
+function pathWithoutClaude(): string {
+  return (process.env.PATH ?? '')
+    .split(delimiter)
+    .filter((d) => d && !existsSync(join(d, 'claude')) && !existsSync(join(d, 'claude.exe')))
+    .join(delimiter)
+}
+
+/**
  * Builds the isolated environment every e2e core runs in: private tmux socket
  * and no tmux config, fresh hosts/state/ssh-config/known_hosts files, a
  * fixture HOME, and either no SSH agent or sshtestd's.
@@ -121,6 +132,7 @@ export function isolatedEnv(dir: string, home: string, socket: string, agentSock
     HARNESS_KNOWN_HOSTS: knownHosts,
     SSH_AUTH_SOCK: agentSock,
     HOME: home,
+    PATH: pathWithoutClaude(),
     // Pin Claude Code's config dir to the fixture: if the developer's shell
     // exports CLAUDE_CONFIG_DIR, the hook installer would otherwise write to
     // their real Claude settings.

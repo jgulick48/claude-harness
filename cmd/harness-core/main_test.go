@@ -130,7 +130,7 @@ func TestRunHappyPath(t *testing.T) {
 	if err := json.Unmarshal([]byte(line), &ready); err != nil {
 		t.Fatal(err)
 	}
-	if ready.Type != "ready" || ready.Port == 0 || ready.Protocol != 5 || ready.Version != version.Version {
+	if ready.Type != "ready" || ready.Port == 0 || ready.Protocol != 6 || ready.Version != version.Version {
 		t.Fatalf("ready: %+v", ready)
 	}
 	go io.Copy(io.Discard, stdoutR)

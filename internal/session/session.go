@@ -241,3 +241,35 @@ type HookInstaller interface {
 type HostsNotifier interface {
 	NotifyHostsChanged()
 }
+
+// Check item states (CheckItem.Status).
+const (
+	CheckOK    = "ok"
+	CheckWarn  = "warn"  // works, but something is missing or worth fixing
+	CheckError = "error" // blocks using the host (e.g. tmux missing)
+)
+
+// CheckItem is one line of a host setup check.
+type CheckItem struct {
+	ID     string `json:"id"`     // stable key, e.g. "tmux", "claude", "hooks"
+	Label  string `json:"label"`  // e.g. "tmux"
+	Status string `json:"status"` // CheckOK, CheckWarn or CheckError
+	Detail string `json:"detail"` // what was found, e.g. "3.4 at /usr/bin/tmux"
+	// Fix explains how to resolve a warn/error ("" when ok). FixCommand is an
+	// optional shell command the user can copy (never run by the app).
+	Fix        string `json:"fix,omitempty"`
+	FixCommand string `json:"fixCommand,omitempty"`
+}
+
+// HostReport is the result of a host setup check.
+type HostReport struct {
+	Host      string      `json:"host"`
+	CheckedAt int64       `json:"checkedAt"` // unix seconds
+	Items     []CheckItem `json:"items"`
+}
+
+// HostChecker is an optional Backend capability: a read-only setup check of
+// the host (it never changes anything on the host). Callers type-assert for it.
+type HostChecker interface {
+	Check(ctx context.Context) (HostReport, error)
+}

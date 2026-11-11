@@ -3,6 +3,14 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Dry run: build (and sign, if secrets exist) without a tag or a release.
+  #   gh workflow run release.yml -f publish=false
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to a GitHub release (only valid when run on a v* tag). Leave off for a dry run that uploads workflow artifacts only."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -14,7 +22,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A manual run only publishes when started on a tag; a dry run
+      # (publish=false) checks nothing tag-related and creates no release.
+      - name: Require a tag to publish
+        if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref_type != 'tag'
+        run: |
+          echo "publish=true needs the workflow to be run on a v* tag (selected: $GITHUB_REF)."
+          exit 1
+
       - name: Compare tag and package version
+        if: github.ref_type == 'tag'
         run: |
           tag_version="${GITHUB_REF_NAME#v}"
           pkg_version="$(node -p "require('./ui/package.json').version")"
@@ -27,6 +44,7 @@ jobs:
       # parallel, and electron-builder would otherwise race to create
       # duplicate drafts for the same tag.
       - name: Create draft release
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -59,7 +77,12 @@ jobs:
 
       - name: Build harness-core
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            # Dry run from a branch: use the version the app declares.
+            VERSION="$(node -p "require('./ui/package.json').version")"
+          fi
           LDFLAGS="-X github.com/jgulick48/claude-harness/internal/version.Version=${VERSION}"
           mkdir -p bin
           if [ "$RUNNER_OS" = "Windows" ]; then
@@ -85,16 +108,157 @@ jobs:
         working-directory: ui
         run: npm ci
 
-      - name: Build and publish to draft release
+      # Decide which signing modes are on from whether the secrets exist.
+      # Only booleans are emitted; secret values never reach step outputs.
+      # See docs/SIGNING.md for the secret and variable names.
+      - name: Detect signing configuration
+        id: sign
+        env:
+          HAS_MAC_CERT: ${{ secrets.MAC_CSC_LINK != '' && secrets.MAC_CSC_KEY_PASSWORD != '' }}
+          HAS_NOTARY_API: ${{ secrets.APPLE_API_KEY != '' && secrets.APPLE_API_KEY_ID != '' && secrets.APPLE_API_ISSUER != '' }}
+          HAS_NOTARY_APPLEID: ${{ secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+          HAS_AZURE: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && vars.AZURE_SIGNING_ENDPOINT != '' && vars.AZURE_SIGNING_ACCOUNT != '' && vars.AZURE_SIGNING_PROFILE != '' && vars.AZURE_SIGNING_PUBLISHER != '' }}
+          HAS_WIN_PFX: ${{ secrets.WIN_CSC_LINK != '' && secrets.WIN_CSC_KEY_PASSWORD != '' }}
+        run: |
+          mac=false notary_api=false notary_appleid=false azure=false pfx=false
+          if [ "$RUNNER_OS" = "macOS" ] && [ "$HAS_MAC_CERT" = "true" ]; then
+            mac=true
+            if [ "$HAS_NOTARY_API" = "true" ]; then
+              notary_api=true
+            elif [ "$HAS_NOTARY_APPLEID" = "true" ]; then
+              notary_appleid=true
+            else
+              echo "::warning::macOS signing is on but no notarization credentials are set; the app will be signed but not notarized."
+            fi
+          fi
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            if [ "$HAS_AZURE" = "true" ]; then
+              azure=true
+            elif [ "$HAS_WIN_PFX" = "true" ]; then
+              pfx=true
+            fi
+          fi
+          {
+            echo "mac=$mac"
+            echo "notary_api=$notary_api"
+            echo "notary_appleid=$notary_appleid"
+            echo "azure=$azure"
+            echo "pfx=$pfx"
+          } >> "$GITHUB_OUTPUT"
+          echo "signing: mac=$mac notarize(api)=$notary_api notarize(apple id)=$notary_appleid windows(azure)=$azure windows(pfx)=$pfx"
+
+      # electron-builder wants the App Store Connect key as a file path.
+      - name: Write App Store Connect API key
+        if: steps.sign.outputs.notary_api == 'true'
+        env:
+          APPLE_API_KEY_B64: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          umask 077
+          key_path="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$APPLE_API_KEY_B64" | base64 --decode > "$key_path"
+          echo "HARNESS_APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
+      - name: Build, sign, and publish (or dry-run)
         working-directory: ui
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: npm run release
+          PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+          SIGN_MAC: ${{ steps.sign.outputs.mac }}
+          SIGN_NOTARY_API: ${{ steps.sign.outputs.notary_api }}
+          SIGN_NOTARY_APPLEID: ${{ steps.sign.outputs.notary_appleid }}
+          SIGN_AZURE: ${{ steps.sign.outputs.azure }}
+          SIGN_PFX: ${{ steps.sign.outputs.pfx }}
+          # Secrets: only the groups that are active get exported (below).
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+          AZURE_SIGNING_PUBLISHER: ${{ vars.AZURE_SIGNING_PUBLISHER }}
+        run: |
+          flags=()
+
+          # Start from today's unsigned behavior and add only what is active.
+          export CSC_IDENTITY_AUTO_DISCOVERY=false
+          unset CSC_LINK CSC_KEY_PASSWORD
+
+          if [ "$SIGN_MAC" = "true" ]; then
+            unset CSC_IDENTITY_AUTO_DISCOVERY
+            export CSC_LINK="$MAC_CSC_LINK" CSC_KEY_PASSWORD="$MAC_CSC_KEY_PASSWORD"
+            # The app reads harnessSigned to enable macOS auto-update.
+            flags+=("-c.extraMetadata.harnessSigned=true")
+            if [ "$SIGN_NOTARY_API" = "true" ]; then
+              export APPLE_API_KEY="$HARNESS_APPLE_API_KEY_PATH"
+              unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+              flags+=("-c.mac.notarize=true")
+            elif [ "$SIGN_NOTARY_APPLEID" = "true" ]; then
+              unset APPLE_API_KEY_ID APPLE_API_ISSUER
+              flags+=("-c.mac.notarize=true")
+            else
+              unset APPLE_API_KEY_ID APPLE_API_ISSUER APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+              flags+=("-c.mac.notarize=false")
+            fi
+          else
+            unset APPLE_API_KEY_ID APPLE_API_ISSUER APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+            flags+=("-c.mac.notarize=false")
+          fi
+          unset MAC_CSC_LINK MAC_CSC_KEY_PASSWORD
+
+          if [ "$SIGN_AZURE" = "true" ]; then
+            # Azure wins if both Azure and a .pfx are configured.
+            unset WIN_CSC_LINK WIN_CSC_KEY_PASSWORD
+            flags+=(
+              "-c.win.azureSignOptions.endpoint=$AZURE_SIGNING_ENDPOINT"
+              "-c.win.azureSignOptions.codeSigningAccountName=$AZURE_SIGNING_ACCOUNT"
+              "-c.win.azureSignOptions.certificateProfileName=$AZURE_SIGNING_PROFILE"
+              "-c.win.azureSignOptions.publisherName=$AZURE_SIGNING_PUBLISHER"
+            )
+          elif [ "$SIGN_PFX" = "true" ]; then
+            unset AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET
+          else
+            unset WIN_CSC_LINK WIN_CSC_KEY_PASSWORD AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET
+          fi
+
+          if [ "$PUBLISH" = "true" ]; then
+            npm run release -- "${flags[@]}"
+          else
+            npm run build
+            npx electron-builder --publish never "${flags[@]}"
+          fi
+
+      - name: Remove App Store Connect API key
+        if: always() && steps.sign.outputs.notary_api == 'true'
+        run: rm -f "$HARNESS_APPLE_API_KEY_PATH"
+
+      - name: Upload installers (dry run)
+        if: github.event_name == 'workflow_dispatch' && !inputs.publish
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.os }}
+          path: |
+            ui/dist/*.dmg
+            ui/dist/*.zip
+            ui/dist/*.exe
+            ui/dist/*.AppImage
+            ui/dist/*.blockmap
+            ui/dist/latest*.yml
+          if-no-files-found: error
+          retention-days: 7
 
   publish:
     name: publish release
     needs: build
+    if: github.event_name == 'push' || inputs.publish
     runs-on: ubuntu-latest
     steps:
       - name: Publish draft release

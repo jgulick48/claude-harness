@@ -81,4 +81,10 @@ The Release workflow builds installers for macOS (dmg/zip, arm64 + x64), Windows
 
 Installed apps check for updates shortly after startup and every 4 hours (also via **Check for Updates…**). Windows and Linux (AppImage) download updates in the background and offer **Restart to install** (otherwise the update installs on next quit). Set `HARNESS_DISABLE_UPDATES=1` to turn update checks off.
 
-macOS builds are unsigned (no Apple Developer account yet). On first launch use right-click → Open, or run `xattr -cr "/Applications/Claude Harness.app"`. Updates on macOS are manual: the app shows "Update vX available" with a button that opens the GitHub release page.
+Until signing is configured (see [docs/SIGNING.md](docs/SIGNING.md)), macOS builds are unsigned. On first launch use right-click → Open, or run `xattr -cr "/Applications/Claude Harness.app"`. Updates on macOS are manual until then: the app shows "Update vX available" with a button that opens the GitHub release page.
+
+Signing and notarization (macOS Developer ID, Windows Azure Trusted Signing or a `.pfx`) turn on automatically when the repo secrets are added, and signed macOS builds auto-update. [docs/SIGNING.md](docs/SIGNING.md) lists what to obtain and the secret names. To test a signed build without cutting a tag, run a dry run, which uploads the installers as workflow artifacts and publishes nothing:
+
+```sh
+gh workflow run release.yml -f publish=false
+```

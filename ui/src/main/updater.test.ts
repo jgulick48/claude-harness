@@ -10,7 +10,7 @@ class FakeUpdater extends EventEmitter {
   quitAndInstall = vi.fn()
 }
 
-function make(platform: NodeJS.Platform, supported = true) {
+function make(platform: NodeJS.Platform, supported = true, signed?: boolean) {
   const updater = new FakeUpdater()
   const openExternal = vi.fn()
   const log = vi.fn()
@@ -20,6 +20,7 @@ function make(platform: NodeJS.Platform, supported = true) {
     updater: updater as unknown as AutoUpdaterLike,
     platform,
     supported,
+    signed,
     openExternal,
     log,
     beforeInstall,
@@ -109,7 +110,7 @@ describe.each(['win32', 'linux'] as const)('%s', (platform) => {
   })
 })
 
-describe('darwin', () => {
+describe('darwin (unsigned)', () => {
   it('does not auto-download, and opens the release page', async () => {
     const { ctl, updater, openExternal } = make('darwin')
     expect(updater.autoDownload).toBe(false)
@@ -132,6 +133,43 @@ describe('darwin', () => {
     updater.emit('update-available', { version: '1.0.0/../../evil' })
     ctl.openDownload()
     expect(openExternal).not.toHaveBeenCalled()
+  })
+})
+
+describe('darwin (signed)', () => {
+  it('auto-downloads, auto-installs on quit, and restarts to install when ready', async () => {
+    const { ctl, updater, beforeInstall, openExternal } = make('darwin', true, true)
+    expect(updater.autoDownload).toBe(true)
+    expect(updater.autoInstallOnAppQuit).toBe(true)
+
+    await ctl.check({ manual: false })
+    updater.emit('update-available', { version: '1.2.3' })
+    expect(ctl.state).toMatchObject({ state: 'available', version: '1.2.3', manualDownload: false })
+    ctl.openDownload()
+    expect(openExternal).not.toHaveBeenCalled()
+
+    await ctl.install() // not ready yet
+    expect(updater.quitAndInstall).not.toHaveBeenCalled()
+    updater.emit('download-progress', { percent: 10 })
+    updater.emit('update-downloaded', { version: '1.2.3' })
+    expect(ctl.state).toEqual({ state: 'ready', version: '1.2.3' })
+    await ctl.install()
+    expect(beforeInstall).toHaveBeenCalledTimes(1)
+    expect(updater.quitAndInstall).toHaveBeenCalledTimes(1)
+  })
+
+  it('signed=false behaves like unsigned', () => {
+    const { updater } = make('darwin', true, false)
+    expect(updater.autoDownload).toBe(false)
+    expect(updater.autoInstallOnAppQuit).toBe(false)
+  })
+
+  it('signed has no effect on win32/linux', () => {
+    for (const p of ['win32', 'linux'] as const) {
+      const { updater } = make(p, true, false)
+      expect(updater.autoDownload).toBe(true)
+      expect(updater.autoInstallOnAppQuit).toBe(true)
+    }
   })
 })
 

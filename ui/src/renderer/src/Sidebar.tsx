@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useCore } from './CoreContext'
 import { UpdateBanner } from './UpdateBanner'
 import { HooksDialog, type HooksMode } from './HooksDialog'
+import { HostCheckDialog } from './HostCheckDialog'
+import { canRunCheckFromStatus } from './hostCheck'
 import { StatusBadge } from './StatusBadge'
 import { canRemoveHooks, hooksNotice, orderSessions, waitingCount } from './claudeStatus'
 import { ATTENTION_SORT_KEY, loadFlag, NOTIFICATIONS_KEY, saveFlag } from './prefs'
@@ -59,6 +61,7 @@ function HostMenu({
   menu,
   onChange,
   onReconnect,
+  onCheck,
   onRemove,
   onRemoveHooks,
   onClose
@@ -66,6 +69,7 @@ function HostMenu({
   menu: HostMenuState
   onChange: (m: HostMenuState) => void
   onReconnect: () => void
+  onCheck: () => void
   onRemove: () => void
   onRemoveHooks: () => void
   onClose: () => void
@@ -88,11 +92,13 @@ function HostMenu({
         </>
       ) : (
         <>
+          <button className="ctx-item" role="menuitem" autoFocus onClick={onCheck}>
+            Check host…
+          </button>
           {menu.host.kind === 'ssh' && (
             <button
               className="ctx-item"
               role="menuitem"
-              autoFocus
               disabled={!canReconnect(menu.host)}
               onClick={onReconnect}
             >
@@ -100,7 +106,7 @@ function HostMenu({
             </button>
           )}
           {canRemoveHooks(menu.host) && (
-            <button className="ctx-item" role="menuitem" autoFocus={menu.host.kind !== 'ssh'} onClick={onRemoveHooks}>
+            <button className="ctx-item" role="menuitem" onClick={onRemoveHooks}>
               Remove Claude status hooks…
             </button>
           )}
@@ -279,6 +285,7 @@ export function Sidebar(): React.JSX.Element {
   const [hooksDialog, setHooksDialog] = useState<{ host: Host; mode: HooksMode } | null>(null)
   // Hosts whose hooks notice the user dismissed with "Not now" (this run only).
   const [hooksDismissed, setHooksDismissed] = useState<Set<string>>(new Set())
+  const [checkHost, setCheckHost] = useState<Host | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -364,8 +371,6 @@ export function Sidebar(): React.JSX.Element {
           const retrying = host.state === 'disconnected' && host.retryAt !== undefined
           const statusText = retrying ? reconnectText(host.retryAt!, now) : hostStatusText(host)
           const isFolded = folded.has(host.id)
-          const isSsh = host.kind === 'ssh'
-          const hasMenu = isSsh || canRemoveHooks(host)
           // A changed key re-opens the panel: collapse is per host and fingerprint.
           const trustId = `${host.id}|${host.hostKey?.fingerprint ?? ''}`
           const openHostMenu = (x: number, y: number): void => {
@@ -377,7 +382,6 @@ export function Sidebar(): React.JSX.Element {
               <div
                 className="host-header"
                 onContextMenu={(e) => {
-                  if (!hasMenu) return
                   e.preventDefault()
                   openHostMenu(e.clientX, e.clientY)
                 }}
@@ -406,19 +410,17 @@ export function Sidebar(): React.JSX.Element {
                   </span>
                 )}
                 <span className="host-count">{ok ? sessions.length : ''}</span>
-                {hasMenu && (
-                  <button
-                    className="icon-button small"
-                    title={`Host actions for ${host.name}`}
-                    aria-label={`Host actions for ${host.name}`}
-                    onClick={(e) => {
-                      const r = e.currentTarget.getBoundingClientRect()
-                      openHostMenu(r.left, r.bottom + 2)
-                    }}
-                  >
-                    ⋯
-                  </button>
-                )}
+                <button
+                  className="icon-button small"
+                  title={`Host actions for ${host.name}`}
+                  aria-label={`Host actions for ${host.name}`}
+                  onClick={(e) => {
+                    const r = e.currentTarget.getBoundingClientRect()
+                    openHostMenu(r.left, r.bottom + 2)
+                  }}
+                >
+                  ⋯
+                </button>
                 <button
                   className="icon-button small"
                   disabled={!canCreateOn(host)}
@@ -455,6 +457,11 @@ export function Sidebar(): React.JSX.Element {
                   <span className="host-error-text" title={retrying ? host.error : undefined}>
                     {statusText}
                   </span>
+                  {canRunCheckFromStatus(host.state) && (
+                    <button className="link-button" onClick={() => setCheckHost(host)}>
+                      Run setup check
+                    </button>
+                  )}
                   {canReconnect(host) && (
                     <button
                       className="btn small"
@@ -555,6 +562,11 @@ export function Sidebar(): React.JSX.Element {
             setHostMenu(null)
             if (client) act(client.request('hosts.connect', { host: h.id }))
           }}
+          onCheck={() => {
+            const h = hostMenu.host
+            setHostMenu(null)
+            setCheckHost(h)
+          }}
           onRemoveHooks={() => {
             const h = hostMenu.host
             setHostMenu(null)
@@ -581,6 +593,17 @@ export function Sidebar(): React.JSX.Element {
               void Notification.requestPermission()
           }}
           onClose={() => setSettings(null)}
+        />
+      )}
+      {checkHost && (
+        <HostCheckDialog
+          host={state.hosts.find((h) => h.id === checkHost.id) ?? checkHost}
+          onClose={() => setCheckHost(null)}
+          onInstallHooks={() => {
+            const h = state.hosts.find((x) => x.id === checkHost.id) ?? checkHost
+            setCheckHost(null)
+            setHooksDialog({ host: h, mode: h.claudeHooks === 'outdated' ? 'update' : 'install' })
+          }}
         />
       )}
       {hooksDialog && (

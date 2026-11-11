@@ -401,6 +401,7 @@ var methods = map[string]bool{
 	"term.attach": true, "term.resize": true, "term.detach": true,
 	"hosts.configHosts": true, "remote.completeDir": true, "remote.suggestDirs": true,
 	"hosts.installHooks": true, "hosts.removeHooks": true,
+	"hosts.check": true,
 }
 
 func (cn *conn) handleText(data []byte) {
@@ -505,6 +506,9 @@ func (cn *conn) call(method string, id int64, p *params) (any, error) {
 	}
 	if method == "hosts.installHooks" || method == "hosts.removeHooks" {
 		return cn.handleHooks(ctx, method, p) // hooks.go
+	}
+	if method == "hosts.check" {
+		return cn.handleCheck(ctx, p) // check.go
 	}
 	if strings.HasPrefix(method, "hosts.") {
 		return cn.hostsCall(method, p)

@@ -65,7 +65,7 @@ test('window opens, the real preload bridge works and the core connects', async 
   const keys = await page.evaluate(() => Object.keys(window.harness).sort())
   expect(keys).toEqual(Object.keys(bridgeKeys).sort())
 
-  await expect(page.getByText(/^Core:/)).toHaveText(/Core: connected · v\S+ · protocol 5/)
+  await expect(page.getByText(/^Core:/)).toHaveText(/Core: connected · v\S+ · protocol 6/)
   const host = page.getByTestId('host-group').filter({ hasText: 'This computer' })
   await expect(host.getByLabel('connected', { exact: true })).toBeVisible()
 
