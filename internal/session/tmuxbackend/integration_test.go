@@ -155,7 +155,8 @@ func TestCreateClaudeCommand(t *testing.T) {
 	waitFor(t, func() bool {
 		return strings.Contains(tm(t, b, "capture-pane", "-p", "-t", s.ID), "stub-claude-ran")
 	})
-	if got := tm(t, b, "display", "-p", "-t", s.ID, "#{pane_current_command}"); got != "sh" {
+	// /bin/sh is bash on macOS and dash on Debian/Ubuntu; either way a shell, not claude.
+	if got := tm(t, b, "display", "-p", "-t", s.ID, "#{pane_current_command}"); got != "sh" && got != "bash" && got != "dash" {
 		t.Errorf("pane command = %q, want the shell to survive", got)
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"path"
 	"reflect"
 	"regexp"
 	"sort"
@@ -189,12 +189,15 @@ func (b *Backend) List(ctx context.Context) ([]session.Session, error) {
 	return list, nil
 }
 
+// expandDir expands "~" against the host's home. Host paths are always POSIX
+// (tmux hosts are macOS/Linux), so this uses path, not filepath, even when the
+// desktop running the core is Windows.
 func (b *Backend) expandDir(dir string) string {
 	switch {
 	case dir == "" || dir == "~":
 		return b.home
 	case strings.HasPrefix(dir, "~/"):
-		return filepath.Join(b.home, dir[2:])
+		return path.Join(b.home, dir[2:])
 	}
 	return dir
 }
@@ -253,6 +256,10 @@ func (b *Backend) Create(ctx context.Context, opts session.CreateOptions) (sessi
 			return fail(err)
 		}
 	}
+	// Wait for the shell to draw its prompt. Shells can discard keystrokes typed
+	// while they start up (bash does on macOS), and until the shell is running
+	// tmux may report the server's cwd instead of the pane's.
+	b.waitShellReady(ctx, id)
 	if opts.Command == session.CommandClaude {
 		// Typed into the shell rather than exec'd, so exiting Claude leaves a shell.
 		if _, err := b.run.Output(ctx, "send-keys", "-t", id, "-l", "claude"); err != nil {
@@ -274,6 +281,31 @@ func (b *Backend) Create(ctx context.Context, opts session.CreateOptions) (sessi
 		}
 	}
 	return session.Session{}, fmt.Errorf("%w: %s", session.ErrNotFound, id)
+}
+
+// shellReadyTimeout bounds waitShellReady; a shell with an empty prompt just
+// costs this delay once.
+var shellReadyTimeout = 5 * time.Second
+
+// waitShellReady polls until the pane's cursor leaves the origin, i.e. the shell
+// has printed its prompt, or the timeout passes. Best effort: errors are ignored.
+func (b *Backend) waitShellReady(ctx context.Context, id string) {
+	ctx, cancel := context.WithTimeout(ctx, shellReadyTimeout)
+	defer cancel()
+	t := time.NewTicker(25 * time.Millisecond)
+	defer t.Stop()
+	for {
+		out, err := b.run.Output(ctx, "display", "-p", "-t", id, "#{cursor_x} #{cursor_y}")
+		if err == nil && strings.TrimSpace(string(out)) != "0 0" {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			b.log.Debug("shell not ready before timeout", "session", id)
+			return
+		case <-t.C:
+		}
+	}
 }
 
 func (b *Backend) Kill(ctx context.Context, id string) error {
@@ -314,8 +346,8 @@ func sanitizeName(s string) string {
 }
 
 func defaultName(dir string) string {
-	base := filepath.Base(filepath.Clean(dir))
-	if base == "." || base == string(filepath.Separator) {
+	base := path.Base(path.Clean(dir))
+	if base == "." || base == "/" {
 		base = ""
 	}
 	base = sanitizeName(base)
