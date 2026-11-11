@@ -217,8 +217,8 @@ export async function prepareIsolation(opts: IsolatedOpts = {}): Promise<Isolati
         }
       }
     }
-    rmSync(dir, { recursive: true, force: true })
-    rmSync(sshTmux, { recursive: true, force: true })
+    removeDir(dir)
+    removeDir(sshTmux)
   }
 
   try {
@@ -232,6 +232,20 @@ export async function prepareIsolation(opts: IsolatedOpts = {}): Promise<Isolati
   } catch (e) {
     await cleanup()
     throw e
+  }
+}
+
+/**
+ * Removes a fixture dir. The just-killed tmux server's shells may still be
+ * writing (e.g. history) into it for a moment, which makes rmdir fail with
+ * ENOTEMPTY, so retry; and never fail a finished test over leftover temp
+ * files, just warn.
+ */
+function removeDir(p: string): void {
+  try {
+    rmSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+  } catch (e) {
+    console.warn(`e2e cleanup: could not remove ${p}: ${(e as Error).message}`)
   }
 }
 
