@@ -54,6 +54,10 @@ type Host struct {
 	TmuxVersion string `json:"tmuxVersion,omitempty"`
 	// HostKey is set when State == HostKeyUnknown.
 	HostKey *HostKeyPrompt `json:"hostKey,omitempty"`
+	// RetryAt is when the next automatic reconnect attempt happens (unix
+	// milliseconds). Set only while State is HostDisconnected and a retry is
+	// scheduled.
+	RetryAt int64 `json:"retryAt,omitempty"`
 }
 
 // HostKeyPrompt describes an unknown SSH host key awaiting the user's decision.
@@ -141,4 +145,52 @@ type HostManager interface {
 	// the set of hosts changes. Callbacks must not block.
 	Subscribe(fn func([]Host)) (unsubscribe func())
 	Close() error
+}
+
+// DirEntry is one directory returned by DirCompleter.CompleteDir.
+type DirEntry struct {
+	Path    string `json:"path"`    // same form as the prefix ("~/src/app/" or "/srv/app/"); ends with "/"
+	GitRepo bool   `json:"gitRepo"` // the directory contains .git
+}
+
+// DirCompleter is an optional Backend capability: browsing the host's
+// directories for the new-terminal dialog. Callers type-assert for it.
+type DirCompleter interface {
+	// CompleteDir lists directories whose path starts with prefix. prefix is
+	// "", "~", "~/...", or an absolute path; "" means "~/". A prefix ending in
+	// "/" lists that directory's children; otherwise the last segment is a
+	// name prefix. Results keep the prefix's form ("~/..." stays "~/..."),
+	// end with "/", are sorted, and are capped at 100. Hidden directories are
+	// included only when the typed name prefix starts with ".". A directory
+	// that doesn't exist yields an empty list, not an error.
+	CompleteDir(ctx context.Context, prefix string) ([]DirEntry, error)
+	// FindRepos returns git repositories under the host's home as "~/..."
+	// paths (with a trailing "/"), searching at most 3 levels deep, skipping
+	// node_modules and hidden directories, capped at 50 results and ~3s.
+	FindRepos(ctx context.Context) ([]string, error)
+}
+
+// ConfigHost is a concrete Host entry from ~/.ssh/config (no wildcards).
+type ConfigHost struct {
+	Alias    string `json:"alias"`
+	HostName string `json:"hostName"`
+	User     string `json:"user"`
+	Port     int    `json:"port"`
+	Added    bool   `json:"added"` // a saved host already uses this alias as its target
+}
+
+// ConfigHostLister is an optional HostManager capability: listing hosts that
+// can be imported from ~/.ssh/config. Callers type-assert for it.
+type ConfigHostLister interface {
+	ConfigHosts(ctx context.Context) ([]ConfigHost, error)
+}
+
+// RecentDirs remembers directories used to create sessions, per host
+// (most recent first, at most 10, persisted across restarts). Safe for
+// concurrent use.
+type RecentDirs interface {
+	Add(host, dir string)
+	List(host string) []string
+	// Forget drops a host's history (e.g. when the host is removed).
+	Forget(host string)
 }

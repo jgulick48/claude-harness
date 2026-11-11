@@ -388,6 +388,7 @@ type params struct {
 	Cols        json.RawMessage `json:"cols"`
 	Rows        json.RawMessage `json:"rows"`
 	Stream      json.RawMessage `json:"stream"`
+	Prefix      string          `json:"prefix"`
 }
 
 var methods = map[string]bool{
@@ -395,6 +396,7 @@ var methods = map[string]bool{
 	"hosts.trustKey": true, "sessions.list": true, "sessions.create": true,
 	"sessions.kill": true, "sessions.rename": true,
 	"term.attach": true, "term.resize": true, "term.detach": true,
+	"hosts.configHosts": true, "remote.completeDir": true, "remote.suggestDirs": true,
 }
 
 func (cn *conn) handleText(data []byte) {
@@ -494,6 +496,9 @@ func (cn *conn) streamParam(raw json.RawMessage) (*stream, error) {
 
 func (cn *conn) call(method string, id int64, p *params) (any, error) {
 	ctx := cn.ctx
+	if method == "hosts.configHosts" {
+		return cn.handleConfigHosts(ctx) // confighosts.go
+	}
 	if strings.HasPrefix(method, "hosts.") {
 		return cn.hostsCall(method, p)
 	}
@@ -526,6 +531,10 @@ func (cn *conn) call(method string, id int64, p *params) (any, error) {
 		return nil, err
 	}
 	switch method {
+	case "remote.completeDir":
+		return cn.handleCompleteDir(ctx, b, p) // remote.go
+	case "remote.suggestDirs":
+		return cn.handleSuggestDirs(ctx, b, p) // remote.go
 	case "sessions.list":
 		list, err := b.List(ctx)
 		if err != nil {
