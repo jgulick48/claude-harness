@@ -125,7 +125,20 @@ export function TerminalPane({ host, sessionId, session, hostName, hostConnected
       })
 
     let debounce: ReturnType<typeof setTimeout> | null = null
-    const ro = new ResizeObserver(() => {
+    // Refit only when the box itself changed size (to the whole pixel). This
+    // breaks feedback loops where fitting changes layout that re-triggers the
+    // observer, e.g. a scrollbar appearing and disappearing on Windows.
+    let lastW = -1
+    let lastH = -1
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[entries.length - 1]?.contentRect
+      if (r) {
+        const w = Math.round(r.width)
+        const h = Math.round(r.height)
+        if (w === lastW && h === lastH) return
+        lastW = w
+        lastH = h
+      }
       if (debounce) clearTimeout(debounce)
       debounce = setTimeout(() => {
         if (disposed) return
