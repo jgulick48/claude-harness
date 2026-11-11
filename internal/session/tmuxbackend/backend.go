@@ -78,6 +78,15 @@ type hostOps interface {
 	dirExists(ctx context.Context, dir string) (bool, error)
 	// homeDir returns the host user's home directory.
 	homeDir(ctx context.Context) (string, error)
+	// completeDir lists the subdirectories of dir (an absolute POSIX path)
+	// whose names start with name. A missing dir yields nothing. Hidden-name
+	// and ordering rules are applied by the caller; at most limit entries need
+	// be returned.
+	completeDir(ctx context.Context, dir, name string, limit int) ([]dirItem, error)
+	// findRepos returns git repository directories under home as paths
+	// relative to home ("src/app"), searching to depth 3. It returns what it
+	// has when ctx expires.
+	findRepos(ctx context.Context, home string) ([]string, error)
 }
 
 type localOps struct{ home string }

@@ -212,3 +212,91 @@ func resolveWith(cfg *ssh_config.Config, target string) (Resolved, error) {
 	}
 	return r, nil
 }
+
+// ListConfigHosts returns the concrete Host aliases of the ssh config in
+// config order, each resolved with the usual defaults (HostName, User, Port).
+// Patterns containing '*', '?' or '!' are skipped (so are negated entries), a
+// "Host a b" line yields two entries, Include directives are followed (up to
+// the parser's depth limit; relative paths are relative to ~/.ssh as in
+// OpenSSH), Match blocks are ignored and duplicates are dropped. A missing
+// config file yields an empty list.
+func ListConfigHosts(opts Options) ([]Resolved, error) {
+	cfg, err := loadConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+	var aliases []string
+	seen := map[string]bool{}
+	collectAliases(cfg, 0, seen, &aliases)
+	out := make([]Resolved, 0, len(aliases))
+	for _, a := range aliases {
+		r, err := resolveWith(cfg, a)
+		if err != nil {
+			continue // a bad entry (e.g. invalid Port) shouldn't hide the others
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+func collectAliases(cfg *ssh_config.Config, depth int, seen map[string]bool, out *[]string) {
+	for _, h := range cfg.Hosts {
+		if strings.HasPrefix(strings.TrimSpace(h.String()), "Match") {
+			continue // Match blocks (and any Include inside them) are ignored
+		}
+		for _, p := range h.Patterns {
+			s := p.String()
+			if s == "" || strings.ContainsAny(s, "*?!") || seen[s] {
+				continue
+			}
+			seen[s] = true
+			*out = append(*out, s)
+		}
+		if depth >= 5 {
+			continue
+		}
+		for _, n := range h.Nodes {
+			inc, ok := n.(*ssh_config.Include)
+			if !ok {
+				continue
+			}
+			for _, f := range includeFiles(inc) {
+				fh, err := os.Open(f)
+				if err != nil {
+					continue
+				}
+				sub, err := ssh_config.Decode(fh)
+				fh.Close()
+				if err != nil {
+					continue
+				}
+				collectAliases(sub, depth+1, seen, out)
+			}
+		}
+	}
+}
+
+// includeFiles expands an Include directive's globs like OpenSSH does for a
+// user config: absolute paths as is, "~/" under home, anything else under ~/.ssh.
+func includeFiles(inc *ssh_config.Include) []string {
+	line := strings.TrimSpace(inc.String())
+	line = strings.TrimSpace(strings.TrimPrefix(line, "Include"))
+	line = strings.TrimSpace(strings.TrimPrefix(line, "="))
+	if i := strings.Index(line, "#"); i >= 0 {
+		line = line[:i]
+	}
+	var files []string
+	for _, d := range strings.Fields(line) {
+		d = strings.Trim(d, `"`)
+		switch {
+		case filepath.IsAbs(d):
+		case strings.HasPrefix(d, "~/"):
+			d = filepath.Join(homeDir(), d[2:])
+		default:
+			d = filepath.Join(homeDir(), ".ssh", d)
+		}
+		m, _ := filepath.Glob(d)
+		files = append(files, m...)
+	}
+	return files
+}

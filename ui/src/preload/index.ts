@@ -13,6 +13,11 @@ contextBridge.exposeInMainWorld('harness', {
     ipcRenderer.on('update:status', listener)
     return () => ipcRenderer.removeListener('update:status', listener)
   },
+  onSystemResume: (cb: () => void): (() => void) => {
+    const listener = (): void => cb()
+    ipcRenderer.on('system:resume', listener)
+    return () => ipcRenderer.removeListener('system:resume', listener)
+  },
   checkForUpdates: (): Promise<void> => ipcRenderer.invoke('update:check'),
   installUpdate: (): Promise<void> => ipcRenderer.invoke('update:install'),
   downloadUpdate: (): Promise<void> => ipcRenderer.invoke('update:download')

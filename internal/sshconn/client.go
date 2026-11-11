@@ -162,7 +162,7 @@ func connectHop(ctx context.Context, prev *ssh.Client, r Resolved, opts Options,
 		}()
 		cause := hctx.Err()
 		if ctx.Err() == nil && errors.Is(cause, context.DeadlineExceeded) {
-			return nil, fmt.Errorf("connect %s: timed out after %s", addr, opts.Timeout)
+			return nil, fmt.Errorf("connect %s: timed out after %s: %w", addr, opts.Timeout, cause)
 		}
 		return nil, fmt.Errorf("connect %s: %w", addr, cause)
 	}
@@ -176,7 +176,7 @@ func (c *Client) watch(opts Options) {
 		if err == nil || errors.Is(err, io.EOF) {
 			err = errors.New("connection closed by remote")
 		}
-		c.finish(fmt.Errorf("connection lost: %w", err))
+		c.finish(fmt.Errorf("%w: %w", ErrConnectionLost, err))
 	}()
 	if opts.KeepAlive < 0 {
 		return
@@ -213,11 +213,11 @@ func (c *Client) keepAlive(cl *ssh.Client, every, timeout time.Duration) {
 			fails++
 			c.log.Debug("ssh keepalive failed", "err", err, "consecutive", fails)
 			if fails >= 2 {
-				c.finish(fmt.Errorf("connection lost: keepalive failed: %w", err))
+				c.finish(fmt.Errorf("%w: keepalive failed: %w", ErrConnectionLost, err))
 				return
 			}
 		case <-tm.C:
-			c.finish(fmt.Errorf("connection lost: keepalive timed out after %s", timeout))
+			c.finish(fmt.Errorf("%w: keepalive timed out after %s", ErrConnectionLost, timeout))
 			return
 		}
 	}

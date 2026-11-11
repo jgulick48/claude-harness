@@ -1,6 +1,6 @@
-import { createContext, useContext, useEffect, useReducer, useState } from 'react'
+import { createContext, useContext, useEffect, useReducer, useRef, useState } from 'react'
 import { connectCore, type ClientState, type CoreClient } from './coreClient'
-import type { Host, Session } from './sessions'
+import { shouldRetryOnResume, type Host, type Session } from './sessions'
 import { initialState, reducer, type Action, type AppState } from './store'
 
 interface Ctx {
@@ -77,6 +77,25 @@ export function CoreProvider({ children }: { children: React.ReactNode }): React
       .catch((e: Error) => console.warn('hosts.list failed:', e.message))
     return () => {
       stale = true
+    }
+  }, [connected, client])
+
+  // After sleep or when the network returns, retry hosts without waiting for
+  // their backoff timer.
+  const hostsRef = useRef(state.hosts)
+  hostsRef.current = state.hosts
+  useEffect(() => {
+    if (!connected || !client) return
+    const retry = (): void => {
+      for (const h of hostsRef.current) {
+        if (shouldRetryOnResume(h)) client.request('hosts.connect', { host: h.id }).catch(() => {})
+      }
+    }
+    const off = window.harness.onSystemResume(retry)
+    window.addEventListener('online', retry)
+    return () => {
+      off()
+      window.removeEventListener('online', retry)
     }
   }, [connected, client])
 

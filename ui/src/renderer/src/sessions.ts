@@ -22,6 +22,8 @@ export interface Host {
   /** Reason for disconnected / unavailable / error. */
   error?: string
   hostKey?: HostKey
+  /** Unix ms of the next automatic reconnect attempt (disconnected hosts only). */
+  retryAt?: number
   home?: string
   tmuxVersion?: string
 }
@@ -42,6 +44,45 @@ export function hostStatusText(h: Pick<Host, 'state' | 'error'>): string {
     case 'host_key_unknown':
       return 'Host key not trusted yet'
   }
+}
+
+/** Live countdown text for an automatic reconnect; never negative. */
+export function reconnectText(retryAt: number, now: number): string {
+  const secs = Math.max(0, Math.ceil((retryAt - now) / 1000))
+  return `Reconnecting in ${secs}s…`
+}
+
+/** Error messages that retrying cannot fix (the user has to act). */
+const PERMANENT_ERROR = /auth|host key|no ssh authentication|changed/i
+
+export function isPermanentError(message: string | undefined): boolean {
+  return !!message && PERMANENT_ERROR.test(message)
+}
+
+/**
+ * Whether to call hosts.connect for a host after the machine wakes or the
+ * network returns: SSH hosts that are disconnected, or in error with a cause
+ * that is not obviously permanent.
+ */
+export function shouldRetryOnResume(h: Pick<Host, 'kind' | 'state' | 'error'>): boolean {
+  if (h.kind !== 'ssh') return false
+  if (h.state === 'disconnected') return true
+  return h.state === 'error' && !isPermanentError(h.error)
+}
+
+export type ReattachAction = 'reattach' | 'gone' | 'none'
+
+/**
+ * What a terminal view whose stream ended should do automatically. Only a
+ * 'connection lost' end is recovered, and only once the host is connected again.
+ */
+export function autoReattachAction(p: {
+  ended: string | null
+  hostConnected: boolean
+  sessionExists: boolean
+}): ReattachAction {
+  if (p.ended !== 'connection lost' || !p.hostConnected) return 'none'
+  return p.sessionExists ? 'reattach' : 'gone'
 }
 
 /** Sessions can only be created on connected hosts. */

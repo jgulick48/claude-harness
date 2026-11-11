@@ -1,7 +1,7 @@
 # Core ↔ UI protocol
 
 How the Electron app launches `harness-core` and talks to it. See
-[ARCHITECTURE.md](ARCHITECTURE.md) §3 and §7 for background. Protocol version: **3** (v2 added requests/results, events, sessions and terminals in M1; v3 adds SSH host management in M2).
+[ARCHITECTURE.md](ARCHITECTURE.md) §3 and §7 for background. Protocol version: **4** (v2 added requests/results, events, sessions and terminals in M1; v3 added SSH host management in M2; v4 adds auto-reconnect, `~/.ssh/config` import and directory suggestions in M3).
 
 ## 1. Launch
 
@@ -19,7 +19,7 @@ How the Electron app launches `harness-core` and talks to it. See
    **exactly one line** to stdout, then nothing else to stdout:
 
    ```json
-   {"type":"ready","addr":"127.0.0.1:54321","port":54321,"version":"0.1.0-dev","protocol":3}
+   {"type":"ready","addr":"127.0.0.1:54321","port":54321,"version":"0.1.0-dev","protocol":4}
    ```
 
 4. All logs go to **stderr** (`log/slog` text format). The UI forwards them to
@@ -52,7 +52,7 @@ compared in constant time.
 
 | Endpoint | Auth | Response |
 |---|---|---|
-| `GET /healthz` | Header `Authorization: Bearer <token>` | `200 {"ok":true,"version":"…","protocol":3}`; `401` if the token is missing or wrong |
+| `GET /healthz` | Header `Authorization: Bearer <token>` | `200 {"ok":true,"version":"…","protocol":4}`; `401` if the token is missing or wrong |
 | `GET /ws?token=<token>` | Query parameter (browser WebSockets can't set headers) | WebSocket upgrade; `401` **before** upgrade if the token is missing or wrong |
 
 The WebSocket server doesn't check the Origin header, because the Electron
@@ -68,7 +68,7 @@ Control messages are JSON in **text** frames. Terminal data travels in
 
 | Direction | Message | Notes |
 |---|---|---|
-| core → UI | `{"type":"hello","version":"0.1.0-dev","protocol":3}` | Sent right after connecting |
+| core → UI | `{"type":"hello","version":"0.1.0-dev","protocol":4}` | Sent right after connecting |
 | UI → core | `{"type":"ping","id":1}` | `id` is an integer chosen by the client |
 | core → UI | `{"type":"pong","id":1}` | Echoes the `id` |
 | core → UI | `{"type":"error","id":1,"message":"…"}` | Reply to a failed request, or to an unknown `type`. `id` is echoed if the request had one, otherwise omitted. The connection stays open. |
@@ -100,7 +100,8 @@ Host:    {"id":"local","name":"This computer","kind":"local","state":"connected"
          {"id":"devbox","name":"devbox","kind":"ssh","target":"me@devbox.lan","state":"host_key_unknown",
           "hostKey":{"address":"devbox.lan","keyType":"ssh-ed25519","fingerprint":"SHA256:…"}}
          state: "connected" | "connecting" | "disconnected" | "unavailable" | "host_key_unknown" | "error"
-         ("error" carries the reason for disconnected / unavailable / error)
+         ("error" carries the reason for disconnected / unavailable / error;
+          "retryAt" (unix ms) is set while disconnected with an automatic retry scheduled)
 Session: {"id":"$3","name":"h-api-1","harnessName":"","managed":true,"cwd":"/home/me/work/api",
           "windows":1,"attached":0,"created":1794420293}
 ```
@@ -111,6 +112,7 @@ Session: {"id":"$3","name":"h-api-1","harnessName":"","managed":true,"cwd":"/hom
 | `hosts.add` | `target` (an `~/.ssh/config` alias or `user@host[:port]`), `name` (optional) | `Host`. The host is saved and starts connecting in the background; follow `hosts.changed`. |
 | `hosts.remove` | `host` | `null`. Disconnects and forgets the host. Its tmux sessions keep running there. `local` can't be removed. |
 | `hosts.connect` | `host` | `null`. Reconnects a host that is `disconnected` or in `error`. |
+| `hosts.configHosts` | none | `[ConfigHost]`: concrete `Host` entries from `~/.ssh/config` (wildcard patterns skipped), each `{"alias","hostName","user","port","added"}`. `added` is true when a saved host already uses that alias as its target. |
 | `hosts.trustKey` | `host`, `fingerprint` | `null`. Adds the pending host key to `~/.ssh/known_hosts` and reconnects. `fingerprint` must match `hostKey.fingerprint`; this guards against a key changing between the prompt and the click. |
 | `sessions.list` | `host` | `[Session]` |
 | `sessions.create` | `host`, `dir` (optional, `~` allowed, default home), `name` (optional), `command` (`"shell"` default or `"claude"`) | `Session` |
@@ -121,8 +123,19 @@ Event `hosts.changed`, pushed on connect and whenever any host's info or the
 set of hosts changes: `{"type":"event","event":"hosts.changed","hosts":[Host]}`.
 
 A host whose connection drops ends its open streams with `term.closed`, reason
-`"connection lost"`. Its sessions are still running on the host; reattach after
-`hosts.connect`.
+`"connection lost"`. Its sessions are still running on the host.
+
+**Automatic reconnect.** After a connection is lost, or after a connect attempt
+fails for a reason that may be temporary (network unreachable, timeout,
+connection refused, DNS failure), core retries on its own with exponential
+backoff: 1 s, 2 s, 4 s and so on, capped at 60 s, with ±20 % jitter. While
+waiting, the host is `disconnected` with `retryAt` set. Failures that need the
+user (`host_key_unknown`, a changed host key, no usable SSH keys, an
+authentication failure) are **not** retried. They stay in `host_key_unknown`
+or `error` until the user acts. `hosts.connect` retries immediately and resets
+the backoff. The backoff also resets when a connection is lost after staying
+up for at least 30 s, so a host that accepts and then drops at once isn't retried every second. The UI reattaches open views
+once the host is back.
 
 Event `sessions.changed`, pushed on connect for each host and whenever that
 host's list changes:
@@ -131,6 +144,19 @@ host's list changes:
 **Display label rule (UI):** `harnessName` if non-empty, otherwise the
 basename of `cwd`, otherwise `name`. `managed: false` means the session was
 started outside the app, so the UI tags it `external`.
+
+### 5.1 Directory suggestions
+
+Used by the new-terminal dialog.
+
+| Method | Params | Result |
+|---|---|---|
+| `remote.completeDir` | `host`, `prefix` (`""`, `~`, `~/…` or absolute) | `[{"path":"~/src/app/","gitRepo":true}]`. Directories matching `prefix`, in the same form as the prefix, each ending in `/`, sorted, at most 100. A prefix ending in `/` lists that directory's children. Hidden directories appear only when the typed name starts with `.`. A missing directory gives `[]`. |
+| `remote.suggestDirs` | `host` | `{"recent":["~/work/api"],"repos":["~/src/app/"]}`. `recent` holds the directories used to create sessions on this host, most recent first, at most 10, kept across restarts. `repos` holds git repositories found under home, up to 3 levels deep, at most 50. The search takes at most ~3 s; when it times out, `repos` is partial. |
+
+A host without filesystem browsing gives `[]` / `{"recent":[…],"repos":[]}`.
+A successful `sessions.create` records its `dir` (as given; `""` is recorded as
+`~`) in that host's recent list. Removing a host forgets its list.
 
 ## 6. Terminals
 

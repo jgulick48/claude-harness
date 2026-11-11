@@ -26,6 +26,8 @@ export interface HarnessApi {
   getCoreInfo(): Promise<CoreInfo | { error: string }>
   onCoreStatus(cb: (s: CoreStatus) => void): () => void
   onUpdateStatus(cb: (s: UpdateStatus) => void): () => void
+  /** Fires when the machine wakes from sleep. Returns unsubscribe. */
+  onSystemResume(cb: () => void): () => void
   checkForUpdates(): Promise<void>
   installUpdate(): Promise<void>
   downloadUpdate(): Promise<void>

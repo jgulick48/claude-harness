@@ -494,3 +494,54 @@ func TestHandshakeTimeout(t *testing.T) {
 		t.Fatalf("want timeout, got %v", err)
 	}
 }
+
+func TestListConfigHosts(t *testing.T) {
+	dir := t.TempDir()
+	inc := filepath.Join(dir, "extra.conf")
+	if err := os.WriteFile(inc, []byte("Host included\n  HostName inc.example\n  Port 2022\nHost *.skip\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(dir, "config")
+	body := "Include " + inc + "\n" +
+		"Host dev prod\n  HostName 10.0.0.1\n  User bob\n  Port 2200\n" +
+		"Host *\n  User fallback\n" +
+		"Host wild* q? !neg\n  User x\n" +
+		"Host dev\n  User dup\n" +
+		"Match host never\n  User m\n" +
+		"Host last\n  User l\n" +
+		"Host bare\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ListConfigHosts(Options{ConfigFile: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, r := range got {
+		names = append(names, r.Target)
+	}
+	if want := "included dev prod last bare"; strings.Join(names, " ") != want {
+		t.Fatalf("aliases %v, want %s", names, want)
+	}
+	byName := map[string]Resolved{}
+	for _, r := range got {
+		byName[r.Target] = r
+	}
+	if r := byName["dev"]; r.HostName != "10.0.0.1" || r.User != "bob" || r.Port != 2200 {
+		t.Fatalf("dev %+v", r)
+	}
+	if r := byName["included"]; r.HostName != "inc.example" || r.Port != 2022 {
+		t.Fatalf("included %+v", r)
+	}
+	if r := byName["bare"]; r.HostName != "bare" || r.Port != 22 || r.User != "fallback" {
+		t.Fatalf("bare %+v", r)
+	}
+}
+
+func TestListConfigHostsMissingFile(t *testing.T) {
+	got, err := ListConfigHosts(Options{ConfigFile: filepath.Join(t.TempDir(), "nope")})
+	if err != nil || len(got) != 0 {
+		t.Fatalf("got %v, %v", got, err)
+	}
+}

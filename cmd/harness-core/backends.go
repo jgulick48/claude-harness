@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/jgulick48/claude-harness/internal/hosts"
+	"github.com/jgulick48/claude-harness/internal/recent"
 	"github.com/jgulick48/claude-harness/internal/session"
 	"github.com/jgulick48/claude-harness/internal/session/tmuxbackend"
 	"github.com/jgulick48/claude-harness/internal/sshconn"
@@ -22,6 +23,7 @@ import (
 //	HARNESS_TMUX_CONFIG  tmux config file, passed as -f (e.g. /dev/null to skip
 //	                     ~/.tmux.conf); applies to the local host and SSH hosts
 //	HARNESS_HOSTS_FILE   saved SSH hosts (default <user config dir>/claude-harness/hosts.json)
+//	HARNESS_STATE_FILE   recent directories per host (default <user config dir>/claude-harness/state.json)
 //	HARNESS_SSH_CONFIG   ssh config file (default ~/.ssh/config)
 //	HARNESS_KNOWN_HOSTS  known_hosts file (default ~/.ssh/known_hosts)
 //
@@ -84,3 +86,15 @@ func (l localOnly) Subscribe(fn func([]session.Host)) func() {
 	return func() {}
 }
 func (l localOnly) Close() error { return l.local.Close() }
+
+// newRecentStore opens the recent-directories store (HARNESS_STATE_FILE, or the
+// default path). If it can't be opened the error is logged and recording is
+// disabled (nil).
+func newRecentStore(logger *slog.Logger, getenv func(string) string) session.RecentDirs {
+	st, err := recent.New(getenv("HARNESS_STATE_FILE"), logger)
+	if err != nil {
+		logger.Error("recent directories unavailable", "err", err)
+		return nil
+	}
+	return st
+}

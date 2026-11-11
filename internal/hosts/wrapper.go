@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/jgulick48/claude-harness/internal/session"
 	"github.com/jgulick48/claude-harness/internal/sshconn"
@@ -41,6 +43,13 @@ type sshHost struct {
 	gen    int
 	closed bool
 
+	// Automatic reconnect (guarded by mu).
+	attempts    int       // failed/lost attempts since the last stable connection or manual connect
+	connectedAt time.Time // when the current connection came up
+	timer       stopper   // pending retry, if any
+	timerTok    int       // identifies the pending timer; stale firings are ignored
+	retryAt     time.Time // when the pending retry fires
+
 	fanMu     sync.Mutex
 	subs      map[int]func([]session.Session)
 	nextSub   int
@@ -59,6 +68,9 @@ func (h *sshHost) Host(ctx context.Context) session.Host {
 	h.mu.Lock()
 	host := session.Host{ID: h.id, Name: h.name, Kind: session.KindSSH, Target: h.target,
 		State: h.state, Error: h.errMsg}
+	if h.state == session.HostDisconnected && h.timer != nil {
+		host.RetryAt = h.retryAt.UnixMilli()
+	}
 	inner := h.inner
 	if h.key != nil && h.state == session.HostKeyUnknown {
 		host.HostKey = &session.HostKeyPrompt{Address: h.key.Address, KeyType: h.key.KeyType, Fingerprint: h.key.Fingerprint}
@@ -177,21 +189,64 @@ func (h *sshHost) deactivate() {
 	h.deliver(0, nil)
 }
 
-// start begins a connection attempt unless one is running or established.
-func (h *sshHost) start() {
+// start begins a connection attempt unless one is running or established. A
+// manual start (user connect, trust, add, startup) cancels a pending retry and
+// resets the backoff.
+func (h *sshHost) start(manual bool) {
 	h.mu.Lock()
 	if h.closed || h.state == session.HostConnecting || h.state == session.HostConnected {
 		h.mu.Unlock()
 		return
 	}
+	h.beginLocked(manual)
+}
+
+// beginLocked starts an attempt; h.mu is held and released here.
+func (h *sshHost) beginLocked(manual bool) {
+	h.stopTimerLocked()
+	if manual {
+		h.attempts = 0
+	}
 	h.gen++
 	gen := h.gen
+	if h.cancel != nil {
+		h.cancel() // release the previous attempt's context
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	h.cancel = cancel
 	h.state, h.errMsg, h.key = session.HostConnecting, "", nil
 	h.mu.Unlock()
 	h.m.notify()
 	go h.connect(ctx, gen)
+}
+
+func (h *sshHost) stopTimerLocked() {
+	if h.timer != nil {
+		h.timer.Stop()
+		h.timer = nil
+	}
+	h.timerTok++
+}
+
+// scheduleRetryLocked moves the host to disconnected with the given reason
+// and arms the next backoff timer. h.mu is held; the caller notifies.
+func (h *sshHost) scheduleRetryLocked(msg string) {
+	h.stopTimerLocked()
+	d := h.m.delayFor(h.attempts)
+	h.attempts++
+	h.state, h.errMsg, h.key = session.HostDisconnected, msg, nil
+	h.retryAt = h.m.nowTime().Add(d)
+	tok := h.timerTok
+	h.timer = h.m.afterFunc(d, func() { h.onTimer(tok) })
+}
+
+func (h *sshHost) onTimer(tok int) {
+	h.mu.Lock()
+	if h.closed || tok != h.timerTok || h.state != session.HostDisconnected {
+		h.mu.Unlock()
+		return
+	}
+	h.beginLocked(false)
 }
 
 func (h *sshHost) fail(gen int, state, msg string, key *sshconn.UnknownHostKeyError) {
@@ -201,6 +256,18 @@ func (h *sshHost) fail(gen int, state, msg string, key *sshconn.UnknownHostKeyEr
 		return
 	}
 	h.state, h.errMsg, h.key = state, msg, key
+	h.mu.Unlock()
+	h.m.notify()
+}
+
+// retry records a retryable failure and schedules the next attempt.
+func (h *sshHost) retry(gen int, msg string) {
+	h.mu.Lock()
+	if gen != h.gen || h.closed {
+		h.mu.Unlock()
+		return
+	}
+	h.scheduleRetryLocked(msg)
 	h.mu.Unlock()
 	h.m.notify()
 }
@@ -216,6 +283,8 @@ func (h *sshHost) connect(ctx context.Context, gen int) {
 			h.fail(gen, session.HostKeyUnknown, "", unknown)
 		case errors.As(err, &changed):
 			h.fail(gen, session.HostError, changed.Error(), nil)
+		case isRetryable(err):
+			h.retry(gen, err.Error())
 		default:
 			h.fail(gen, session.HostError, err.Error(), nil)
 		}
@@ -228,7 +297,11 @@ func (h *sshHost) connect(ctx context.Context, gen int) {
 	inner, err := m.newBackend(ctx, h.id, h.name, c, m.opts.TmuxOptions)
 	if err != nil {
 		_ = c.Close()
-		h.fail(gen, session.HostError, err.Error(), nil)
+		if isRetryable(err) {
+			h.retry(gen, err.Error())
+		} else {
+			h.fail(gen, session.HostError, err.Error(), nil)
+		}
 		return
 	}
 	h.mu.Lock()
@@ -240,6 +313,10 @@ func (h *sshHost) connect(ctx context.Context, gen int) {
 	}
 	h.inner, h.client = inner, c
 	h.state, h.errMsg, h.key = session.HostConnected, "", nil
+	// Don't reset the backoff yet: a host that accepts and then drops at once
+	// would otherwise be retried every second forever. It resets on loss if the
+	// connection had been up for stableAfter.
+	h.connectedAt = h.m.nowTime()
 	h.mu.Unlock()
 
 	h.fanMu.Lock()
@@ -258,7 +335,11 @@ func (h *sshHost) connect(ctx context.Context, gen int) {
 	unsub()
 	msg := "connection lost"
 	if err := c.Err(); err != nil {
-		msg += ": " + err.Error()
+		if strings.HasPrefix(err.Error(), msg) {
+			msg = err.Error()
+		} else {
+			msg += ": " + err.Error()
+		}
 	}
 	h.mu.Lock()
 	if gen != h.gen || h.closed {
@@ -266,7 +347,10 @@ func (h *sshHost) connect(ctx context.Context, gen int) {
 		return
 	}
 	h.inner, h.client = nil, nil
-	h.state, h.errMsg = session.HostDisconnected, msg
+	if h.m.nowTime().Sub(h.connectedAt) >= stableAfter {
+		h.attempts = 0
+	}
+	h.scheduleRetryLocked(msg)
 	h.mu.Unlock()
 	h.deactivate()
 	_ = inner.Close()
@@ -283,6 +367,7 @@ func (h *sshHost) shutdown() {
 	}
 	h.closed = true
 	h.gen++
+	h.stopTimerLocked()
 	if h.cancel != nil {
 		h.cancel()
 	}

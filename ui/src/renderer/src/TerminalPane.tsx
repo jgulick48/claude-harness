@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { useCore } from './CoreContext'
-import { closedMessage, sessionLabel, type Session } from './sessions'
+import { autoReattachAction, closedMessage, sessionLabel, type Session } from './sessions'
 
 function cssVar(name: string, fallback: string): string {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -37,6 +37,25 @@ export function TerminalPane({ host, sessionId, session, hostName, hostConnected
   const [error, setError] = useState<string | null>(null)
   // Bumped by Reattach to re-run the attach effect for the same session.
   const [attempt, setAttempt] = useState(0)
+  // True while the current attach is an automatic one; a failure then means the session is gone.
+  const autoRef = useRef(false)
+  const sessionExists = session !== undefined
+
+  // Reattach on its own once the host is back after "connection lost".
+  const autoCount = useRef(0)
+  useEffect(() => {
+    if (!hostConnected) autoCount.current = 0
+    const action = autoReattachAction({ ended, hostConnected, sessionExists })
+    if (action === 'reattach') {
+      // Bounded so a host that flaps while looking connected cannot spin.
+      if (autoCount.current >= 3) return
+      autoCount.current++
+      autoRef.current = true
+      setAttempt((n) => n + 1)
+    } else if (action === 'gone') {
+      setEnded('session ended')
+    }
+  }, [ended, hostConnected, sessionExists])
 
   useEffect(() => {
     if (!client || !boxRef.current) return
@@ -46,6 +65,8 @@ export function TerminalPane({ host, sessionId, session, hostName, hostConnected
     let offStream: (() => void) | null = null
     setEnded(null)
     setError(null)
+    const wasAuto = autoRef.current
+    autoRef.current = false
 
     const term = new Terminal({
       fontFamily: FONT,
@@ -98,7 +119,9 @@ export function TerminalPane({ host, sessionId, session, hostName, hostConnected
         term.focus()
       })
       .catch((e: Error) => {
-        if (!disposed) setError(e.message)
+        if (disposed) return
+        if (wasAuto) setEnded('session ended')
+        else setError(e.message)
       })
 
     let debounce: ReturnType<typeof setTimeout> | null = null

@@ -49,6 +49,7 @@ type Manager struct {
 	dial       func(ctx context.Context, target string, o sshconn.Options) (sshClient, error)
 	newBackend func(ctx context.Context, id, name string, c sshClient, o tmuxbackend.Options) (session.Backend, error)
 	trust      func(knownHostsFile, address string, key ssh.PublicKey) error
+	rs         retrySeams
 
 	mu     sync.Mutex
 	hosts  []*sshHost // insertion order
@@ -119,7 +120,7 @@ func (m *Manager) init() error {
 	m.wg.Add(1)
 	go m.dispatch()
 	for _, h := range m.hosts {
-		h.start()
+		h.start(true)
 	}
 	return nil
 }
@@ -223,7 +224,7 @@ func (m *Manager) Add(ctx context.Context, target, name string) (session.Host, e
 		return session.Host{}, fmt.Errorf("save hosts: %w", err)
 	}
 	m.mu.Unlock()
-	h.start()
+	h.start(true)
 	return h.Host(ctx), nil
 }
 
@@ -263,7 +264,7 @@ func (m *Manager) Connect(ctx context.Context, id string) error {
 	if h == nil {
 		return fmt.Errorf("%w: unknown host: %s", session.ErrNotFound, id)
 	}
-	h.start() // no-op while connecting or connected
+	h.start(true) // no-op while connecting or connected; cancels a pending retry
 	return nil
 }
 
@@ -285,7 +286,7 @@ func (m *Manager) TrustHostKey(ctx context.Context, id, fingerprint string) erro
 	if err := m.trust(m.knownHostsFile(), key.Address, key.Key); err != nil {
 		return fmt.Errorf("trust host key: %w", err)
 	}
-	h.start()
+	h.start(true)
 	return nil
 }
 
@@ -367,3 +368,26 @@ func (m *Manager) Close() error {
 	}
 	return err
 }
+
+// ConfigHosts implements session.ConfigHostLister: the concrete hosts of
+// ~/.ssh/config, with Added set when a saved host's target is that alias.
+func (m *Manager) ConfigHosts(ctx context.Context) ([]session.ConfigHost, error) {
+	rs, err := sshconn.ListConfigHosts(m.opts.SSH)
+	if err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	added := map[string]bool{}
+	for _, h := range m.hosts {
+		added[h.target] = true
+	}
+	m.mu.Unlock()
+	out := make([]session.ConfigHost, 0, len(rs))
+	for _, r := range rs {
+		out = append(out, session.ConfigHost{Alias: r.Target, HostName: r.HostName, User: r.User,
+			Port: r.Port, Added: added[r.Target]})
+	}
+	return out, nil
+}
+
+var _ session.ConfigHostLister = (*Manager)(nil)

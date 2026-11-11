@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useCore } from './CoreContext'
+import { DirCombo } from './DirCombo'
 import { canCreateOn, type Session } from './sessions'
 
 export function NewTerminalDialog({ preferredHost }: { preferredHost?: string }): React.JSX.Element {
@@ -17,7 +18,7 @@ export function NewTerminalDialog({ preferredHost }: { preferredHost?: string })
   const close = (): void => dispatch({ type: 'closeDialog' })
   useEffect(() => {
     const key = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') dispatch({ type: 'closeDialog' })
+      if (e.key === 'Escape' && !e.defaultPrevented) dispatch({ type: 'closeDialog' })
     }
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
@@ -55,10 +56,10 @@ export function NewTerminalDialog({ preferredHost }: { preferredHost?: string })
             ))}
           </select>
         </label>
-        <label>
-          Directory
-          <input autoFocus value={dir} onChange={(e) => setDir(e.target.value)} placeholder="~" spellCheck={false} />
-        </label>
+        <div className="field">
+          <label htmlFor="new-term-dir">Directory</label>
+          <DirCombo id="new-term-dir" host={host} value={dir} onChange={setDir} />
+        </div>
         <label>
           Name (optional)
           <input

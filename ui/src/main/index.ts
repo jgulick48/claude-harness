@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, shell, type MenuItemConstructorOptions } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, powerMonitor, shell, type MenuItemConstructorOptions } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { join } from 'node:path'
 import { resolveCorePath, startCore, type CoreInfo, type RunningCore } from './core'
@@ -155,6 +155,7 @@ ipcMain.handle('core:info', () => coreInfo ?? { error: 'core is not started yet'
 
 app.whenReady().then(() => {
   updates = setupUpdates()
+  powerMonitor.on('resume', () => mainWindow?.webContents.send('system:resume'))
   buildMenu()
   createWindow()
   void launchCore()
