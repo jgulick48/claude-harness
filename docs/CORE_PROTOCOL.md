@@ -1,7 +1,7 @@
 # Core ↔ UI protocol
 
 How the Electron app launches `harness-core` and talks to it. See
-[ARCHITECTURE.md](ARCHITECTURE.md) §3 and §7 for background. Protocol version: **1**.
+[ARCHITECTURE.md](ARCHITECTURE.md) §3 and §7 for background. Protocol version: **2** (v2 adds requests/results, events, sessions and terminals; M1).
 
 ## 1. Launch
 
@@ -19,7 +19,7 @@ How the Electron app launches `harness-core` and talks to it. See
    **exactly one line** to stdout, then nothing else to stdout:
 
    ```json
-   {"type":"ready","addr":"127.0.0.1:54321","port":54321,"version":"0.1.0-dev","protocol":1}
+   {"type":"ready","addr":"127.0.0.1:54321","port":54321,"version":"0.1.0-dev","protocol":2}
    ```
 
 4. All logs go to **stderr** (`log/slog` text format). The UI forwards them to
@@ -52,25 +52,93 @@ compared in constant time.
 
 | Endpoint | Auth | Response |
 |---|---|---|
-| `GET /healthz` | Header `Authorization: Bearer <token>` | `200 {"ok":true,"version":"…","protocol":1}`; `401` if the token is missing or wrong |
+| `GET /healthz` | Header `Authorization: Bearer <token>` | `200 {"ok":true,"version":"…","protocol":2}`; `401` if the token is missing or wrong |
 | `GET /ws?token=<token>` | Query parameter (browser WebSockets can't set headers) | WebSocket upgrade; `401` **before** upgrade if the token is missing or wrong |
 
 The WebSocket server doesn't check the Origin header, because the Electron
 renderer's origin varies (`http://localhost:<port>` in dev, `file://` when
 packaged). The token is the access control.
 
-## 4. WebSocket messages (v1)
+## 4. WebSocket messages
 
-All messages are JSON in text frames. Binary frames are reserved for terminal
-data from M1 onward.
+Control messages are JSON in **text** frames. Terminal data travels in
+**binary** frames (§6).
+
+### 4.1 Basics
 
 | Direction | Message | Notes |
 |---|---|---|
-| core → UI | `{"type":"hello","version":"0.1.0-dev","protocol":1}` | Sent right after connecting |
+| core → UI | `{"type":"hello","version":"0.1.0-dev","protocol":2}` | Sent right after connecting |
 | UI → core | `{"type":"ping","id":1}` | `id` is an integer chosen by the client |
 | core → UI | `{"type":"pong","id":1}` | Echoes the `id` |
-| core → UI | `{"type":"error","id":1,"message":"unknown message type: foo"}` | Unknown `type`. `id` is echoed if the request had one, otherwise omitted. The connection stays open. |
+| core → UI | `{"type":"error","id":1,"message":"…"}` | Reply to a failed request, or to an unknown `type`. `id` is echoed if the request had one, otherwise omitted. The connection stays open. |
 | core → UI | `{"type":"error","message":"invalid JSON"}` | Malformed message. The connection stays open. |
 
 If the protocol number in `hello` doesn't match the UI's expected protocol,
 the UI shows a version-mismatch error instead of continuing.
+
+### 4.2 Requests and results
+
+A request is `{"type":"<method>","id":<int>, ...params}`. Every request gets
+exactly one reply with the same `id`: either
+`{"type":"result","id":<int>,"result":<value>}` or
+`{"type":"error","id":<int>,"message":"…","code":"<code>"}`.
+
+Error codes: `bad_request`, `not_found` (unknown host/session/stream),
+`unavailable` (host can't run tmux), `internal`.
+
+### 4.3 Events
+
+Events are pushed by core and have no `id`: `{"type":"event","event":"<name>", ...fields}`.
+
+## 5. Hosts and sessions
+
+The objects mirror `internal/session` (`Host`, `Session`):
+
+```json
+Host:    {"id":"local","name":"This computer","state":"connected","home":"/home/me","tmuxVersion":"3.2a"}
+         state: "connected" | "unavailable" (+ "error": "tmux not found")
+Session: {"id":"$3","name":"h-api-1","harnessName":"","managed":true,"cwd":"/home/me/work/api",
+          "windows":1,"attached":0,"created":1794420293}
+```
+
+| Method | Params | Result |
+|---|---|---|
+| `hosts.list` | none | `[Host]`. M1 has only `local`. |
+| `sessions.list` | `host` | `[Session]` |
+| `sessions.create` | `host`, `dir` (optional, `~` allowed, default home), `name` (optional), `command` (`"shell"` default or `"claude"`) | `Session` |
+| `sessions.kill` | `host`, `session` | `null` |
+| `sessions.rename` | `host`, `session`, `name` (`""` clears it) | `null`. Sets the display name only. |
+
+Event `sessions.changed`, pushed on connect for each host and whenever that
+host's list changes:
+`{"type":"event","event":"sessions.changed","host":"local","sessions":[Session]}`.
+
+**Display label rule (UI):** `harnessName` if non-empty, otherwise the
+basename of `cwd`, otherwise `name`. `managed: false` means the session was
+started outside the app, so the UI tags it `external`.
+
+## 6. Terminals
+
+| Method | Params | Result |
+|---|---|---|
+| `term.attach` | `host`, `session`, `cols`, `rows` | `{"stream":<uint32>}` |
+| `term.resize` | `stream`, `cols`, `rows` | `null` |
+| `term.detach` | `stream` | `null`. The tmux session keeps running. |
+
+**Binary frames**, in both directions: a 4-byte **big-endian** stream id
+followed by the payload bytes.
+
+- core → UI: terminal output. The first frames after attach are the
+  **screen seed** (current screen contents and cursor position), followed by
+  live output. The UI writes everything to xterm.js in order.
+- UI → core: input bytes (keystrokes, paste), UTF-8 encoded as xterm.js
+  produces them.
+- A frame for an unknown stream id is ignored.
+
+Event `term.closed`, sent when a stream ends for any reason other than
+`term.detach`:
+`{"type":"event","event":"term.closed","stream":7,"reason":"session ended"}`.
+
+Streams belong to the WebSocket connection that opened them. When the
+connection closes, all its streams are detached.

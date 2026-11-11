@@ -18,7 +18,7 @@ const tok = "secret"
 
 func newTS(t *testing.T) *httptest.Server {
 	t.Helper()
-	ts := httptest.NewServer(NewServer(tok, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	ts := httptest.NewServer(NewServer(tok, slog.New(slog.NewTextHandler(io.Discard, nil)), nil))
 	t.Cleanup(ts.Close)
 	return ts
 }
@@ -52,7 +52,7 @@ func TestHealthz(t *testing.T) {
 				if err := json.NewDecoder(resp.Body).Decode(&b); err != nil {
 					t.Fatal(err)
 				}
-				if b["ok"] != true || b["protocol"] != float64(1) {
+				if b["ok"] != true || b["protocol"] != float64(2) {
 					t.Fatalf("body %v", b)
 				}
 			}
@@ -116,7 +116,7 @@ func TestWSMessages(t *testing.T) {
 	c, ctx := dial(t, ts)
 
 	h := readMsg(t, ctx, c)
-	if h["type"] != "hello" || h["protocol"] != float64(1) || h["version"] == "" {
+	if h["type"] != "hello" || h["protocol"] != float64(2) || h["version"] == "" {
 		t.Fatalf("hello: %v", h)
 	}
 

@@ -51,7 +51,7 @@ Because remote hosts are macOS/Linux only and attaching to existing sessions is
 required, **A** wins. The session layer is still written behind a
 `SessionBackend` interface so a native agent could be added later.
 
-tmux is driven in **control mode** (`tmux -CC`), which provides a structured,
+tmux is driven in **control mode** (`tmux -C`), which provides a structured,
 line-based protocol (`%output`, `%window-add`, `%session-changed`,
 `%subscription-changed`, …) instead of a rendered terminal stream.
 
@@ -104,7 +104,7 @@ Responsibilities:
   - Verify host keys against `~/.ssh/known_hosts`; prompt the UI on unknown keys.
   - One SSH connection per host; multiple channels multiplexed over it.
 - **tmux control-mode client** per host:
-  - Runs `tmux -CC` on an SSH channel (see §4).
+  - Runs `tmux -C` over an SSH channel (or a local process) (see §4).
   - Parses notifications, issues commands, correlates `%begin`/`%end` replies.
   - Subscribes to formats such as `#{pane_current_path}` and `#{@claude_status}`.
 - **Remote helpers** over separate SSH exec channels: directory autocomplete,
@@ -161,13 +161,25 @@ tmux set-option -t <id> @harness_managed 1
 
 ### 4.3 Attaching
 
-1. Open an SSH channel and run `tmux -CC attach-session -t <id>`.
+1. Start a control client: `tmux -C attach-session -t <session_id>`, over an
+   SSH channel or, for the local host, a local process. Use `-C`, not `-CC`:
+   `-CC` is meant for a real terminal, while plain `-C` works over pipes.
+   Replies to our commands arrive as `%begin … 1` / `%end … 1` blocks. The
+   first block after attaching has flags `0`; it isn't ours and is skipped.
 2. Set the client size: `refresh-client -C <cols>x<rows>`.
-3. Seed the screen: `capture-pane -p -e -J -S -<scrollback>` and write the
-   result into xterm.js.
-4. Stream live `%output` for the session's active pane into xterm.js.
-5. Forward keystrokes with `send-keys -H` (hex) so arbitrary bytes and escape
-   sequences pass through safely.
+3. Seed the screen. Read the active pane and cursor with `display -p` and the
+   format `#{pane_id} #{cursor_x} #{cursor_y} #{alternate_on}`, then run
+   `capture-pane -p -e -N -S -<scrollback>`. Don't use `-J`, because lines
+   must stay the shape they have on screen. Write the result into a fresh
+   xterm.js, then put the cursor in place with a CSI sequence. If the
+   alternate screen is active, switch to it first and capture only the
+   visible screen.
+4. Stream live `%output` for that pane into xterm.js. Output that arrived
+   before the capture reply is dropped, because the capture already
+   includes it.
+5. Forward keystrokes with `send-keys -t <pane> -H <hex…>`, in chunks, so
+   any bytes and escape sequences pass through safely.
+6. Detach by closing the control client's stdin. The session keeps running.
 
 ### 4.4 Resizing and shared clients
 

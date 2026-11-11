@@ -34,6 +34,15 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # tmux integration tests run on Linux/macOS; they skip where tmux is absent (Windows).
+      - name: Install tmux (Linux)
+        if: runner.os == 'Linux'
+        run: command -v tmux || (sudo apt-get update && sudo apt-get install -y tmux)
+
+      - name: Install tmux (macOS)
+        if: runner.os == 'macOS'
+        run: command -v tmux || brew install tmux
+
       - name: Check gofmt
         if: runner.os == 'Linux'
         run: |
