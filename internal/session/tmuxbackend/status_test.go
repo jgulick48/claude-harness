@@ -2,10 +2,10 @@ package tmuxbackend
 
 import (
 	"context"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -91,38 +91,69 @@ func TestClaudeStatusShellGuardAfterExec(t *testing.T) {
 	tm(t, b, "send-keys", "-t", s.ID, "exec sleep 600", "Enter")
 	waitPaneCmd(t, b, s.ID, "sleep")
 	tm(t, b, "respawn-pane", "-k", "-t", s.ID, "sh")
-	waitPaneCmd(t, b, s.ID, "sh")
+	// /bin/sh is dash on Debian/Ubuntu and bash on macOS; tmux reports the real name.
+	waitPaneCmdIn(t, b, s.ID, "sh", "bash", "dash")
 	tm(t, b, "set-option", "-t", s.ID, "@claude_status", "waiting")
 	if got := listOne(t, b); got.ClaudeStatus != "" {
 		t.Fatalf("shell guard: %+v", got)
 	}
 }
 
-// fakeClaude copies the sleep binary to <tmp>/claude: tmux reports the
-// executable's name (a shebang script would show as its interpreter). The real
-// claude is never run.
+func waitPaneCmdIn(t *testing.T, b *Backend, target string, want ...string) {
+	t.Helper()
+	var got string
+	for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+		got = tm(t, b, "display-message", "-p", "-t", target, "#{pane_current_command}")
+		if slices.Contains(want, got) {
+			return
+		}
+	}
+	t.Fatalf("pane command %q, want one of %v", got, want)
+}
+
+// fakeClaude builds a tiny Go program named "claude" that just sleeps, so tmux
+// reports pane_current_command "claude". (Copying the sleep binary doesn't
+// work everywhere: newer Ubuntu ships a multi-call coreutils that dispatches on
+// its own name and exits when it's called "claude".) The real claude is never
+// run.
 func fakeClaude(t *testing.T) string {
 	t.Helper()
-	sleep, err := exec.LookPath("sleep")
+	gobin, err := exec.LookPath("go")
 	if err != nil {
-		t.Skip("no sleep binary")
+		t.Skip("go toolchain not on PATH")
 	}
-	src, err := os.Open(sleep)
-	if err != nil {
-		t.Skip(err)
-	}
-	defer src.Close()
-	p := filepath.Join(t.TempDir(), "claude")
-	dst, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY, 0o755)
-	if err != nil {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(src, []byte(fakeClaudeSrc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := io.Copy(dst, src); err != nil {
-		t.Fatal(err)
+	p := filepath.Join(dir, "claude")
+	cmd := exec.Command(gobin, "build", "-o", p, src)
+	cmd.Env = append(os.Environ(), "GOFLAGS=", "GO111MODULE=off")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build fake claude: %v\n%s", err, out)
 	}
-	dst.Close()
 	return p
 }
+
+const fakeClaudeSrc = `package main
+
+import (
+	"os"
+	"strconv"
+	"time"
+)
+
+func main() {
+	n := 600
+	if len(os.Args) > 1 {
+		if v, err := strconv.Atoi(os.Args[1]); err == nil {
+			n = v
+		}
+	}
+	time.Sleep(time.Duration(n) * time.Second)
+}
+`
 
 func TestClaudeStatusUnknownForClaudeCommand(t *testing.T) {
 	b := newTestBackend(t)

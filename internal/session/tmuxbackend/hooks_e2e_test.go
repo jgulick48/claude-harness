@@ -18,6 +18,9 @@ func TestHooksEndToEnd(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("needs a POSIX shell")
 	}
+	// Build before changing HOME: go build would otherwise use a fresh, empty
+	// build cache under the temp HOME and compile the runtime from scratch.
+	bin := fakeClaude(t)
 	home := t.TempDir()
 	cfg := filepath.Join(home, "claude")
 	t.Setenv("HOME", home)
@@ -42,7 +45,6 @@ func TestHooksEndToEnd(t *testing.T) {
 	if s.ClaudeStatus != "" {
 		t.Fatalf("fresh session status %q", s.ClaudeStatus)
 	}
-	bin := fakeClaude(t)
 	line := `printf '%s' '{"hook_event_name":"Notification","notification_type":"permission_prompt","message":"Claude needs your permission"}' | ` +
 		cmd + "; exec " + bin + " 600"
 	tm(t, b, "send-keys", "-t", s.ID, "-l", line)
