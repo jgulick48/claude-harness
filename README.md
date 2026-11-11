@@ -1,6 +1,6 @@
 # claude-harness
 
-Version-controlled configuration for Claude Code.
+Version-controlled configuration for Claude Code, and (in planning) a cross-platform desktop app for running Claude Code across tmux sessions on many machines. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Contents
 
