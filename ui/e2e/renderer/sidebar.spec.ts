@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { expect, shot, test, useEnv } from '../support/harness'
+import { expect, shot, test, useEnv, keys } from '../support/harness'
 
 // tmux has no Windows build; these scenarios drive a real local tmux.
 test.skip(process.platform === 'win32', 'needs tmux')
@@ -41,7 +41,7 @@ test('create three sessions', async ({ page }) => {
 
 test('Ctrl+K focuses the filter, typing filters, Enter attaches, Esc clears', async ({ page }, info) => {
   await focusTerminal(page)
-  await page.keyboard.press('Control+k')
+  await page.keyboard.press(keys.filter)
   await expect(filter(page)).toBeFocused()
 
   await page.keyboard.type('beta')
@@ -53,8 +53,11 @@ test('Ctrl+K focuses the filter, typing filters, Enter attaches, Esc clears', as
   await page.keyboard.press('Enter')
   await expect(page.getByRole('button', { name: 'beta-build' })).toHaveAttribute('aria-current', 'true')
 
-  // The new terminal takes focus; Ctrl+K brings the filter back.
-  await page.keyboard.press('Control+k')
+  // The new terminal takes focus asynchronously (once its attach completes);
+  // wait for that, or it can steal focus back from the filter afterwards.
+  await expect(page.locator('.xterm-helper-textarea').first()).toBeFocused()
+  // Ctrl/Cmd+K brings the filter back.
+  await page.keyboard.press(keys.filter)
   await expect(filter(page)).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(filter(page)).toHaveValue('')
@@ -75,13 +78,13 @@ test('Ctrl+K focuses the filter, typing filters, Enter attaches, Esc clears', as
 test('Ctrl+2 attaches the second session; arrows and Enter navigate rows', async ({ page }) => {
   const labels = await order(page)
   await focusTerminal(page)
-  await page.keyboard.press('Control+2')
+  await page.keyboard.press(keys.jump(2))
   // The second session row itself: a name-based button lookup is a substring
   // match and can also hit other buttons (pane headers, menus) under load.
   await expect(rows(page).nth(1)).toHaveAttribute('aria-current', 'true')
   await expect(rows(page).nth(1)).toContainText(labels[1])
 
-  await page.keyboard.press('Control+k')
+  await page.keyboard.press(keys.filter)
   await page.keyboard.press('ArrowDown')
   await expect(rows(page).nth(0)).toBeFocused()
   await page.keyboard.press('ArrowDown')
@@ -109,7 +112,7 @@ test('settings menu has Appearance', async ({ page }) => {
 test('Ctrl+B collapses to a rail; clicking attaches; the setting survives a reload', async ({ page }, info) => {
   const labels = await order(page)
   await focusTerminal(page)
-  await page.keyboard.press('Control+b')
+  await page.keyboard.press(keys.rail)
   const items = page.getByTestId('rail-item')
   await expect(items).toHaveCount(3)
   await expect(rows(page)).toHaveCount(0)

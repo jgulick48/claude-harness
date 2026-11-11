@@ -1,4 +1,4 @@
-import { expect, shot, runInTerminal, test, useEnv } from '../support/harness'
+import { expect, shot, runInTerminal, test, useEnv, keys } from '../support/harness'
 
 test.skip(process.platform === 'win32', 'needs tmux')
 
@@ -71,12 +71,12 @@ test('terminal theme preset and font zoom apply to a live terminal', async ({ pa
   const rowHeight = () => page.locator('.xterm-rows > div').first().evaluate((el) => el.getBoundingClientRect().height)
   await page.locator('.xterm').click()
   const before = await rowHeight()
-  await page.keyboard.press('Control+=')
-  await page.keyboard.press('Control+=')
+  await page.keyboard.press(keys.zoomIn)
+  await page.keyboard.press(keys.zoomIn)
   await expect.poll(rowHeight).toBeGreaterThan(before)
-  await page.keyboard.press('Control+0')
+  await page.keyboard.press(keys.zoomReset)
   await expect.poll(rowHeight).toBe(before)
-  await page.keyboard.press('Control+-')
+  await page.keyboard.press(keys.zoomOut)
   await expect.poll(rowHeight).toBeLessThan(before)
 
   // Persists across reload; terminal is reattached by the app, preset stays.

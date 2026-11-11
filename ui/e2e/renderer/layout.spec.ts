@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test'
-import { expect, shot, test, useEnv } from '../support/harness'
+import { expect, shot, test, useEnv, keys } from '../support/harness'
 
 // Split panes: each pane is its own tmux attach stream. tmux has no Windows build.
 test.skip(process.platform === 'win32', 'needs tmux')
@@ -53,7 +53,7 @@ test('split panes: two sessions, isolation, no duplicates, resize, restore, clos
   await page.locator('.xterm').click()
 
   // Ctrl+Shift+D splits right while the terminal has focus; plain keys are not stolen.
-  await page.keyboard.press('Control+Shift+D')
+  await page.keyboard.press(keys.splitRight)
   await expect(panes(page)).toHaveCount(2)
   await expect(page.getByTestId('empty-pane')).toBeVisible()
   await expect(page.getByTestId('empty-pane')).toContainText('Ctrl+Shift+D')
@@ -78,9 +78,9 @@ test('split panes: two sessions, isolation, no duplicates, resize, restore, clos
   await expect(page.locator('.xterm')).toHaveCount(2)
 
   // Focus by direction, from inside a terminal.
-  await page.keyboard.press('Control+Alt+ArrowRight')
+  await page.keyboard.press(keys.focusRight)
   await expect(pane(page, 1)).toHaveAttribute('data-focused', 'true')
-  await page.keyboard.press('Control+Alt+ArrowLeft')
+  await page.keyboard.press(keys.focusLeft)
   await expect(pane(page, 0)).toHaveAttribute('data-focused', 'true')
 
   // Drag the divider.
@@ -102,7 +102,7 @@ test('split panes: two sessions, isolation, no duplicates, resize, restore, clos
 
   // A third pane below the right one, for the screenshots.
   await pane(page, 1).locator('.xterm').click()
-  await page.keyboard.press('Control+Shift+E')
+  await page.keyboard.press(keys.splitDown)
   await expect(panes(page)).toHaveCount(3)
   await row(page, 'third-three').click()
   await typeInto(page, pane(page, 2), 'echo third-$((3*3))', 'third-9')
@@ -132,11 +132,11 @@ test('split panes: two sessions, isolation, no duplicates, resize, restore, clos
   await expect(panes(page)).toHaveCount(2)
   // Ctrl+Shift+W closes the focused pane too.
   await pane(page, 0).locator('.xterm').click()
-  await page.keyboard.press('Control+Shift+W')
+  await page.keyboard.press(keys.closePane)
   await expect(panes(page)).toHaveCount(1)
   await expect(rows(pane(page, 0))).toBeVisible()
   // The last pane empties instead of going away.
-  await page.keyboard.press('Control+Shift+W')
+  await page.keyboard.press(keys.closePane)
   await expect(panes(page)).toHaveCount(1)
   await expect(page.getByTestId('empty-pane')).toBeVisible()
 
@@ -187,7 +187,7 @@ test('a corrupt saved layout is ignored', async ({ page }) => {
 test('the pane cap shows a message', async ({ page }) => {
   await expect(page.getByText(/^Core:/)).toHaveText(/connected/)
   await page.locator('.pane-leaf').click()
-  for (let i = 0; i < 6; i++) await page.keyboard.press('Control+Shift+D')
+  for (let i = 0; i < 6; i++) await page.keyboard.press(keys.splitRight)
   await expect(panes(page)).toHaveCount(6)
   await expect(page.locator('.toast')).toContainText('At most 6 panes')
 })
