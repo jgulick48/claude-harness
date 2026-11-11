@@ -35,6 +35,11 @@ export interface HarnessApi {
   setAttentionCount(n: number): void
   /** Show and focus the app window (e.g. from a notification click). */
   focusWindow(): void
+  /** Plain text from the system clipboard. */
+  readClipboard(): Promise<string>
+  writeClipboard(text: string): Promise<void>
+  /** Shows the terminal's right-click menu; resolves to the chosen item. */
+  showTerminalMenu(hasSelection: boolean): Promise<'copy' | 'paste' | null>
 }
 
 declare global {

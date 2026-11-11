@@ -89,6 +89,42 @@ test('a session can be created and typed into', async () => {
   await expect(page.locator('.xterm-rows')).toContainText('harness-42')
 })
 
+// Regression: on Windows/Linux xterm.js treats Ctrl+V as a control key and
+// sends ^V to the program (Claude Code binds ^V to "paste image"), so text
+// paste did nothing. `cat -v` shows exactly what bytes the pane receives.
+test('paste from the system clipboard reaches the terminal', async () => {
+  const rows = page.locator('.xterm-rows')
+  await page.locator('.xterm').click()
+  await page.keyboard.type('cat -v')
+  await page.keyboard.press('Enter')
+  const combos = process.platform === 'darwin' ? ['Meta+V'] : ['Control+V', 'Control+Shift+V', 'Shift+Insert']
+  const pasted = (i: number): string => `paste-ok-${i}-${combos[i].replace(/\W/g, '')}`
+  for (const [i, combo] of combos.entries()) {
+    const text = pasted(i)
+    await app.evaluate(({ clipboard }, t) => clipboard.writeText(t), text)
+    await page.keyboard.press(combo)
+    await page.keyboard.press('Enter')
+    // cat -v echoes the line back (tty echo, then cat's output): two rows.
+    await expect(rows.getByText(text, { exact: true })).toHaveCount(2)
+  }
+  // The old bug: ^V went to the pty (shown by cat -v / the tty as ^V or ^M).
+  await expect(rows).not.toContainText('^V')
+  await expect(rows).not.toContainText('^M')
+  // With nothing selected, Ctrl+C is still an interrupt: cat exits to the prompt.
+  await page.keyboard.press('Control+C')
+  await expect(rows).toContainText('$ ', { timeout: 5000 })
+
+  // Copy: double-click selects a word; Ctrl+Shift+C (Cmd+C on macOS) copies it.
+  await app.evaluate(({ clipboard }) => clipboard.writeText('stale'))
+  // xterm puts a transparent layer over its rows (that's what handles the
+  // mouse), so double-click at the word's position like a user would.
+  const box = await rows.getByText(pasted(0), { exact: true }).first().boundingBox()
+  if (!box) throw new Error('pasted text not on screen')
+  await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2)
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+C' : 'Control+Shift+C')
+  await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(pasted(0))
+})
+
 test('Check for Updates… reports that updates are unavailable in an unpackaged build', async () => {
   const labels = await app.evaluate(({ Menu }) => {
     const found: string[] = []

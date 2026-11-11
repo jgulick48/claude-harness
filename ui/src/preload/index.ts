@@ -22,5 +22,10 @@ contextBridge.exposeInMainWorld('harness', {
   installUpdate: (): Promise<void> => ipcRenderer.invoke('update:install'),
   downloadUpdate: (): Promise<void> => ipcRenderer.invoke('update:download'),
   setAttentionCount: (n: number): void => ipcRenderer.send('attention:count', n),
-  focusWindow: (): void => ipcRenderer.send('window:focus')
+  focusWindow: (): void => ipcRenderer.send('window:focus'),
+  // The sandboxed preload can't use Electron's clipboard directly; main does.
+  readClipboard: (): Promise<string> => ipcRenderer.invoke('clipboard:read'),
+  writeClipboard: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:write', text),
+  showTerminalMenu: (hasSelection: boolean): Promise<'copy' | 'paste' | null> =>
+    ipcRenderer.invoke('terminal:menu', hasSelection)
 })

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { clipboardAction } from './terminalKeys'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -80,6 +81,39 @@ export function TerminalPane({ host, sessionId, session, hostName, hostConnected
     term.loadAddon(fit)
     term.loadAddon(new WebLinksAddon((_e, uri) => window.open(uri)))
     term.open(box)
+
+    // Clipboard: see terminalKeys.ts for why Ctrl+V needs handling at all.
+    const isMac = navigator.platform.toLowerCase().includes('mac')
+    const paste = (): void => {
+      void window.harness.readClipboard().then((text) => {
+        // term.paste normalizes newlines and honors bracketed-paste mode, so
+        // Claude Code receives a multi-line paste as one paste.
+        if (text && !disposed) term.paste(text)
+      })
+    }
+    const copy = (): void => {
+      const sel = term.getSelection()
+      if (sel) void window.harness.writeClipboard(sel)
+      term.clearSelection()
+    }
+    term.attachCustomKeyEventHandler((e) => {
+      const action = clipboardAction(e, isMac, term.hasSelection())
+      if (!action) return true
+      e.preventDefault()
+      if (action === 'paste') paste()
+      else copy()
+      return false
+    })
+    const onContextMenu = (e: MouseEvent): void => {
+      e.preventDefault()
+      void window.harness.showTerminalMenu(term.hasSelection()).then((choice) => {
+        if (choice === 'paste') paste()
+        else if (choice === 'copy') copy()
+        term.focus()
+      })
+    }
+    box.addEventListener('contextmenu', onContextMenu)
+
     const doFit = (): void => {
       try {
         fit.fit()
@@ -163,6 +197,7 @@ export function TerminalPane({ host, sessionId, session, hostName, hostConnected
 
     return () => {
       disposed = true
+      box.removeEventListener('contextmenu', onContextMenu)
       if (debounce) clearTimeout(debounce)
       ro.disconnect()
       mq.removeEventListener('change', onScheme)
