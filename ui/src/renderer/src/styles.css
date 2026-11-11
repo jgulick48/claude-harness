@@ -44,6 +44,10 @@ body,
 #root {
   height: 100%;
   margin: 0;
+  /* The app manages its own scrolling. A page-level scrollbar takes layout
+     space on Windows, which shrinks the terminal, which refits, which removes
+     the scrollbar again: a rapid flicker loop. */
+  overflow: hidden;
 }
 
 body {
@@ -96,8 +100,13 @@ body {
 
 .sidebar-body {
   flex: 1;
+  /* Without this, a flex child grows to fit its content and pushes the page
+     taller instead of scrolling inside the sidebar. */
+  min-height: 0;
   padding: 0 12px;
   overflow-y: auto;
+  /* Reserve the scrollbar's space so it appearing doesn't reflow the rows. */
+  scrollbar-gutter: stable;
 }
 
 .status-line {
@@ -115,6 +124,8 @@ body {
 .main-pane {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -294,8 +305,10 @@ body {
 }
 .term-title { font-weight: 600; }
 .term-path { font-size: 12px; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.term-body { position: relative; flex: 1; min-height: 0; background: var(--term-bg); }
-.term-box { position: absolute; inset: 0; padding: 6px 0 0 8px; }
+.term-body { position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--term-bg); }
+/* overflow: hidden keeps xterm's grid (which can round a pixel past its box at
+   fractional display scaling, e.g. 125%) from creating a scrollbar outside. */
+.term-box { position: absolute; inset: 0; padding: 6px 0 0 8px; overflow: hidden; }
 .term-overlay {
   position: absolute;
   inset: 0;
