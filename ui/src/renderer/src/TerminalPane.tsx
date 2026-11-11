@@ -121,7 +121,10 @@ export function TerminalPane({ host, sessionId, session, hostName, hostConnected
       })
       .catch((e: Error) => {
         if (disposed) return
-        if (wasAuto) setEnded('session ended')
+        // term.closed can arrive just before hosts.changed, so an automatic
+        // reattach may run while the host is already down. That is still a
+        // lost connection, not a vanished session: wait for the host again.
+        if (wasAuto) setEnded(/connection lost|unavailable/i.test(e.message) ? 'connection lost' : 'session ended')
         else setError(e.message)
       })
 

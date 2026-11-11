@@ -69,7 +69,11 @@ type Backend struct {
 	// SSH backends only. lostCh is closed when the connection drops (never
 	// closed for local backends); noTmux is set when tmux could not be found.
 	lostCh chan struct{}
-	noTmux string // non-empty: reason tmux is unusable
+	// connDone is the SSH client's own Done channel. It closes a moment before
+	// lostCh (which is closed by a goroutine), so isLost checks both: a host
+	// manager closing this backend right after the drop must still see the loss.
+	connDone <-chan struct{}
+	noTmux   string // non-empty: reason tmux is unusable
 }
 
 // hostOps are the host-side operations that don't go through tmux.
@@ -638,7 +642,16 @@ func (b *Backend) Close() error {
 	b.subs = map[int]func([]session.Session){}
 	b.subsMu.Unlock()
 
+	lost := b.isLost()
 	for _, t := range terms {
+		if lost {
+			// The connection dropped before Close: report that, not a plain close.
+			t.mu.Lock()
+			if t.err == nil && !t.closing {
+				t.err = errConnLost
+			}
+			t.mu.Unlock()
+		}
 		t.Close()
 	}
 	return nil
@@ -650,6 +663,11 @@ func (b *Backend) isLost() bool {
 	}
 	select {
 	case <-b.lostCh:
+		return true
+	default:
+	}
+	select {
+	case <-b.connDone:
 		return true
 	default:
 		return false

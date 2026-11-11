@@ -321,6 +321,9 @@ func (m *Manager) snapshot() []session.Host {
 	return out
 }
 
+// NotifyHostsChanged implements session.HostsNotifier.
+func (m *Manager) NotifyHostsChanged() { m.notify() }
+
 func (m *Manager) notify() {
 	select {
 	case m.wake <- struct{}{}:
