@@ -22,7 +22,14 @@ export type Action =
   | { type: 'hosts'; hosts: Host[] }
   | { type: 'sessions'; host: string; sessions: Session[] }
   | { type: 'upsertSession'; host: string; session: Session }
+  /** Show ref in the focused pane (the pane `active` refers to). */
   | { type: 'attach'; ref: ActiveRef | null }
+  /**
+   * Open ref in a new pane next to the focused one (M6 splits). CONTRACT: the
+   * layout implementation replaces the placeholder case below; until then it
+   * behaves like attach.
+   */
+  | { type: 'openInSplit'; ref: ActiveRef; direction: 'right' | 'down' }
   | { type: 'openDialog'; host?: string }
   | { type: 'closeDialog' }
   | { type: 'openAddHost' }
@@ -47,6 +54,8 @@ export function reducer(state: AppState, a: Action): AppState {
       return { ...state, sessions: { ...state.sessions, [a.host]: next } }
     }
     case 'attach':
+      return { ...state, active: a.ref }
+    case 'openInSplit': // placeholder, see the Action doc
       return { ...state, active: a.ref }
     case 'openDialog':
       return { ...state, dialog: { host: a.host } }
