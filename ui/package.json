@@ -11,9 +11,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "package": "electron-vite build && electron-builder --dir --publish never",
-    "dist": "electron-vite build && electron-builder --publish never"
+    "dist": "electron-vite build && electron-builder --publish never",
+    "release": "electron-vite build && electron-builder --publish always"
   },
   "dependencies": {
+    "electron-updater": "6.8.11",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

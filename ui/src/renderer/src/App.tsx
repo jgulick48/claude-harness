@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { UpdateBanner } from './UpdateBanner'
 import { connectCore, type ClientState } from './coreClient'
 
 function useCoreStatus(): string {
@@ -61,6 +62,7 @@ export function App(): React.JSX.Element {
         <div className="sidebar-body">
           <p className="muted">No hosts yet</p>
         </div>
+        <UpdateBanner />
         <footer className={isError ? 'status-line error' : 'status-line'}>{status}</footer>
       </aside>
       <main className="main-pane">
