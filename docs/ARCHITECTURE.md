@@ -289,30 +289,40 @@ response**, or **idle** in each session, without scraping the screen.
 
 ### 6.2 How status is produced
 
-- `harness-core` can install (with user confirmation) a Claude Code hook
-  config on each host. The hooks set the tmux pane user option
-  `@claude_status`:
-  - `UserPromptSubmit`, `PreToolUse` → `working`
-  - `Notification` (permission prompts and questions) → `waiting`
-  - `Stop` → `idle`
-  - `SessionEnd` → unset
-- Exactly which `Notification` types count as "waiting" vs. "idle" (e.g. a
-  permission prompt vs. an idle reminder) is decided in M4, by checking the
-  hook payload on the Claude Code version in use. The mapping lives in one
-  table in core, so it's easy to adjust.
-- Hooks are guarded so they no-op outside tmux (`[ -n "$TMUX" ]`), and write a
-  timestamp option, `@claude_status_at`, alongside the state.
+- **The script.** On each host the app writes one POSIX `sh` script,
+  `<config dir>/claude-harness/claude-status.sh`, where the config dir is
+  `$CLAUDE_CONFIG_DIR` or `~/.claude`. The script carries a version marker line.
+  When run by a hook it:
+  - reads the hook's JSON from stdin, with no `jq` dependency;
+  - picks a state from the event name and, for `Notification`, from
+    `notification_type`. The mapping is in docs/CORE_PROTOCOL.md §5.2;
+  - runs `tmux set-option -q -t "$TMUX_PANE" @claude_status <state>` and sets
+    `@claude_status_at`, or unsets both on `SessionEnd`.
+
+  It does nothing outside tmux (no `$TMUX`/`$TMUX_PANE`), **always exits 0, and
+  never writes to stdout**. Claude Code injects hook stdout into context on some
+  events, and exit 2 blocks, so the script must never do either.
+- **The installer.** It merges one hook entry per event into the user settings
+  file `<config dir>/settings.json`, the same file Claude Code reads. Each entry
+  runs the script with a short timeout. It reads the existing JSON (an invalid
+  file is refused, never overwritten), keeps every other key and hook, and adds
+  our entries only if they're missing. Entries are identified by the script
+  path. Before writing, it saves a timestamped backup next to the file. Removal
+  deletes only our entries (and the script). Hooks from other settings files
+  merge with these, so project-level hooks keep working.
+- **Status reporting.** Each host reports `claudeHooks`: `installed`,
+  `outdated` (our entries or script are an older version), `missing` or
+  `unknown`. The UI offers **Install** or **Update**, and changes nothing
+  without the user's confirmation.
 
 ### 6.3 How status reaches the UI
 
-- The control-mode client subscribes to `#{@claude_status}`,
-  `#{@claude_status_at}` and `#{pane_current_command}` via
-  `refresh-client -B`. Changes arrive as `%subscription-changed` and are
-  pushed to the UI as `event.sessionChanged`.
-- Sessions that aren't currently attached in the UI still need live status.
-  So each host keeps one lightweight control-mode client for
-  monitoring that subscribes across all sessions. Attaching a view doesn't
-  depend on it.
+- v1 reads `#{@claude_status}`, `#{@claude_status_at}` and the active pane's
+  `#{pane_current_command}` in the existing `list-sessions` poll, every 2 s for
+  each host, including sessions that aren't attached. Changes reach the UI in
+  `sessions.changed`. A push-based control-mode monitor client
+  (`refresh-client -B` subscriptions) is a possible later improvement to cut
+  the latency.
 - **Stale-status guard:** if `pane_current_command` shows Claude is no longer
   running (e.g. it crashed without firing `SessionEnd`), core shows *(none)*
   regardless of the stored option.

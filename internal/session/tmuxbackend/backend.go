@@ -198,10 +198,27 @@ func (b *Backend) Host(ctx context.Context) session.Host {
 			}
 		}
 	}
+	if h.State == session.HostConnected {
+		if hi, ok := any(b).(session.HookInstaller); ok {
+			st, err := hi.HooksStatus(ctx)
+			if err != nil || st == "" {
+				st = session.HooksUnknown
+			}
+			h.ClaudeHooks = st
+		}
+	}
 	if ctx.Err() == nil { // don't cache a probe that was cut short
 		b.hostCache, b.hostAt = h, time.Now()
 	}
 	return h
+}
+
+// invalidateHostCache drops the cached Host so the next Host call re-probes
+// (used after hooks are installed or removed).
+func (b *Backend) invalidateHostCache() {
+	b.hostMu.Lock()
+	b.hostAt = time.Time{}
+	b.hostMu.Unlock()
 }
 
 func isNoServer(err error) bool {
@@ -233,7 +250,30 @@ func mapErr(err error, id string) error {
 var listFormat = strings.Join([]string{
 	"#{session_id}", "#{session_name}", "#{@harness_name}", "#{@harness_managed}",
 	"#{pane_current_path}", "#{session_windows}", "#{session_attached}", "#{session_created}",
+	"#{@claude_status}", "#{@claude_status_at}", "#{pane_current_command}",
 }, fieldSep)
+
+// shellCommands are pane commands that mean "no Claude here".
+var shellCommands = map[string]bool{
+	"sh": true, "bash": true, "zsh": true, "fish": true, "dash": true, "ksh": true, "tcsh": true,
+}
+
+// deriveClaudeStatus maps the @claude_status option and the active pane's
+// command to a Session.ClaudeStatus. A shell in the active pane means Claude
+// has exited, so a stale option is ignored.
+func deriveClaudeStatus(option, paneCmd string) string {
+	if shellCommands[strings.TrimPrefix(paneCmd, "-")] {
+		return ""
+	}
+	switch option {
+	case session.ClaudeWorking, session.ClaudeWaiting, session.ClaudeIdle:
+		return option
+	}
+	if paneCmd == "claude" {
+		return session.ClaudeUnknown
+	}
+	return ""
+}
 
 func (b *Backend) List(ctx context.Context) ([]session.Session, error) {
 	if err := b.gate(); err != nil {
@@ -259,10 +299,19 @@ func (b *Backend) List(ctx context.Context) ([]session.Session, error) {
 		wins, _ := strconv.Atoi(f[5])
 		att, _ := strconv.Atoi(f[6])
 		created, _ := strconv.ParseInt(f[7], 10, 64)
-		list = append(list, session.Session{
+		sess := session.Session{
 			ID: f[0], Name: f[1], HarnessName: f[2], Managed: f[3] == "1",
 			Cwd: f[4], Windows: wins, Attached: att, Created: created,
-		})
+		}
+		if len(f) >= 11 {
+			sess.ClaudeStatus = deriveClaudeStatus(f[8], f[10])
+			if sess.ClaudeStatus != "" {
+				if at, err := strconv.ParseInt(f[9], 10, 64); err == nil && at > 0 {
+					sess.ClaudeStatusAt = at
+				}
+			}
+		}
+		list = append(list, sess)
 	}
 	sort.SliceStable(list, func(i, j int) bool { return list[i].Created < list[j].Created })
 	return list, nil

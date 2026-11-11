@@ -58,6 +58,9 @@ type Host struct {
 	// milliseconds). Set only while State is HostDisconnected and a retry is
 	// scheduled.
 	RetryAt int64 `json:"retryAt,omitempty"`
+	// ClaudeHooks reports whether the Claude status hooks are installed on
+	// this host (HooksInstalled etc.); "" when not checked yet.
+	ClaudeHooks string `json:"claudeHooks,omitempty"`
 }
 
 // HostKeyPrompt describes an unknown SSH host key awaiting the user's decision.
@@ -77,7 +80,32 @@ type Session struct {
 	Windows     int    `json:"windows"`
 	Attached    int    `json:"attached"` // tmux clients attached, including ours
 	Created     int64  `json:"created"`  // unix seconds
+	// ClaudeStatus is Claude Code's state in this session (see ClaudeWorking
+	// etc.); "" when Claude isn't running. ClaudeStatusAt is when the status
+	// last changed (unix seconds), 0 if unknown.
+	ClaudeStatus   string `json:"claudeStatus"`
+	ClaudeStatusAt int64  `json:"claudeStatusAt,omitempty"`
 }
+
+// Claude statuses (Session.ClaudeStatus). They come from Claude Code hooks
+// that set the tmux session options @claude_status / @claude_status_at
+// (docs/ARCHITECTURE.md §6).
+const (
+	ClaudeWorking = "working" // processing a prompt or running tools
+	ClaudeWaiting = "waiting" // needs the user: a permission prompt or a question
+	ClaudeIdle    = "idle"    // finished its turn; nothing pending
+	// ClaudeUnknown: Claude is running in the session's active pane, but no
+	// hook has reported (e.g. hooks not installed on that host).
+	ClaudeUnknown = "unknown"
+)
+
+// Hook install states (Host.ClaudeHooks).
+const (
+	HooksInstalled = "installed" // our hooks are present and current
+	HooksOutdated  = "outdated"  // our hooks are present but an older version
+	HooksMissing   = "missing"   // not installed
+	HooksUnknown   = "unknown"   // couldn't tell (host unreachable, unreadable settings)
+)
 
 // CreateOptions for Backend.Create.
 type CreateOptions struct {
@@ -193,4 +221,16 @@ type RecentDirs interface {
 	List(host string) []string
 	// Forget drops a host's history (e.g. when the host is removed).
 	Forget(host string)
+}
+
+// HookInstaller is an optional Backend capability: installing the Claude Code
+// hooks that report status into tmux. Callers type-assert for it.
+//
+// Install merges our hook entries into the host's Claude Code user settings
+// file, leaving every other setting and hook untouched, after backing the file
+// up. Remove deletes only our entries. Both are idempotent.
+type HookInstaller interface {
+	HooksStatus(ctx context.Context) (string, error) // HooksInstalled / HooksOutdated / HooksMissing
+	InstallHooks(ctx context.Context) error
+	RemoveHooks(ctx context.Context) error
 }

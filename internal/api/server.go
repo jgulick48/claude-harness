@@ -400,6 +400,7 @@ var methods = map[string]bool{
 	"sessions.kill": true, "sessions.rename": true,
 	"term.attach": true, "term.resize": true, "term.detach": true,
 	"hosts.configHosts": true, "remote.completeDir": true, "remote.suggestDirs": true,
+	"hosts.installHooks": true, "hosts.removeHooks": true,
 }
 
 func (cn *conn) handleText(data []byte) {
@@ -501,6 +502,9 @@ func (cn *conn) call(method string, id int64, p *params) (any, error) {
 	ctx := cn.ctx
 	if method == "hosts.configHosts" {
 		return cn.handleConfigHosts(ctx) // confighosts.go
+	}
+	if method == "hosts.installHooks" || method == "hosts.removeHooks" {
+		return cn.handleHooks(ctx, method, p) // hooks.go
 	}
 	if strings.HasPrefix(method, "hosts.") {
 		return cn.hostsCall(method, p)
