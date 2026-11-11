@@ -193,7 +193,12 @@ export async function prepareIsolation(opts: IsolatedOpts = {}): Promise<Isolati
   mkdirSync(home, { recursive: true })
   for (const d of opts.homeDirs ?? []) mkdirSync(join(home, d), { recursive: true })
   const tmuxSocket = `harness-e2e-${process.pid}-${randomBytes(4).toString('hex')}`
-  const sshTmux = join(dir, 'sshtmux')
+  // The test SSH host's tmux socket is <sshTmux>/tmux-<uid>/<socket>. Unix
+  // socket paths are capped (104 bytes on macOS, 108 on Linux), and macOS's
+  // os.tmpdir() (/var/folders/.../T/) alone is ~50, so keep this dir short:
+  // under the long tmpdir, tmux couldn't create the server and every
+  // new-session on the SSH host failed.
+  const sshTmux = process.platform === 'win32' ? join(dir, 'sshtmux') : mkdtempSync('/tmp/hs-')
 
   let ssh: SshTestd | undefined
   const cleanup = async (): Promise<void> => {
@@ -213,13 +218,13 @@ export async function prepareIsolation(opts: IsolatedOpts = {}): Promise<Isolati
       }
     }
     rmSync(dir, { recursive: true, force: true })
+    rmSync(sshTmux, { recursive: true, force: true })
   }
 
   try {
     if (opts.ssh) {
       const sshHome = join(dir, 'sshhome')
       mkdirSync(sshHome, { recursive: true })
-      mkdirSync(sshTmux, { recursive: true })
       ssh = await startSshtestd(sshHome, sshTmux)
     }
     const env = isolatedEnv(dir, home, tmuxSocket, ssh?.agentSocket ?? '')
