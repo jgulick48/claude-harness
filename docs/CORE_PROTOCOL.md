@@ -1,7 +1,7 @@
 # Core ↔ UI protocol
 
 How the Electron app launches `harness-core` and talks to it. See
-[ARCHITECTURE.md](ARCHITECTURE.md) §3 and §7 for background. Protocol version: **6** (v2 added requests/results, events, sessions and terminals in M1; v3 added SSH host management in M2; v4 added auto-reconnect, `~/.ssh/config` import and directory suggestions in M3; v5 added Claude Code status in M4; v6 adds the host setup check in M5).
+[ARCHITECTURE.md](ARCHITECTURE.md) §3 and §7 for background. Protocol version: **7** (v2 added requests/results, events, sessions and terminals in M1; v3 added SSH host management in M2; v4 added auto-reconnect, `~/.ssh/config` import and directory suggestions in M3; v5 added Claude Code status in M4; v6 adds the host setup check in M5; v7 adds run-as-user sessions).
 
 ## 1. Launch
 
@@ -106,7 +106,11 @@ Host:    {"id":"local","name":"This computer","kind":"local","state":"connected"
           Claude status hooks are installed on that host, omitted until checked)
 Session: {"id":"$3","name":"h-api-1","harnessName":"","managed":true,"cwd":"/home/me/work/api",
           "windows":1,"attached":0,"created":1794420293,
-          "claudeStatus":"waiting","claudeStatusAt":1794420400}
+          "claudeStatus":"waiting","claudeStatusAt":1794420400,"runAs":"bob"}
+         runAs: the user the session switched to; omitted when not set.
+         Claude status hooks run as that user and can't reach the login user's tmux
+         server, so a run-as session's claudeStatus is only "unknown" (active pane
+         command is `claude`) or "".
          claudeStatus: "working" | "waiting" | "idle" | "unknown" | "" (Claude not running);
          see §5.2
 ```
@@ -123,7 +127,7 @@ Session: {"id":"$3","name":"h-api-1","harnessName":"","managed":true,"cwd":"/hom
 | `hosts.check` | `host` | `HostReport` (§5.3). A read-only setup check of the host. It changes nothing there. |
 | `hosts.trustKey` | `host`, `fingerprint` | `null`. Adds the pending host key to `~/.ssh/known_hosts` and reconnects. `fingerprint` must match `hostKey.fingerprint`; this guards against a key changing between the prompt and the click. |
 | `sessions.list` | `host` | `[Session]` |
-| `sessions.create` | `host`, `dir` (optional, `~` allowed, default home), `name` (optional), `command` (`"shell"` default or `"claude"`) | `Session` |
+| `sessions.create` | `host`, `dir` (optional, `~` allowed, default home), `name` (optional), `command` (`"shell"` default or `"claude"`), `runAs` (optional Unix user name; the session's shell runs `sudo -iu <user>` then cds to `dir` (interpreted as that user, `~` is their home) and, for `command: "claude"`, starts Claude; sudo asks for a password in the terminal if it needs one. Invalid names are `bad_request`.) | `Session` |
 | `sessions.kill` | `host`, `session` | `null` |
 | `sessions.rename` | `host`, `session`, `name` (`""` clears it) | `null`. Sets the display name only. |
 

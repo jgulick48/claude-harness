@@ -128,6 +128,8 @@ export interface Session {
   claudeStatus?: ClaudeStatus
   /** Unix seconds of the last status change. */
   claudeStatusAt?: number
+  /** Unix user the session's shell runs as (via sudo); omitted for the login user. */
+  runAs?: string
 }
 
 function basename(p: string): string {
@@ -138,6 +140,18 @@ function basename(p: string): string {
 /** harnessName, else basename(cwd), else name. */
 export function sessionLabel(s: Pick<Session, 'harnessName' | 'cwd' | 'name'>): string {
   return s.harnessName || basename(s.cwd) || s.name
+}
+
+const RUN_AS_RE = /^[A-Za-z_][A-Za-z0-9._-]{0,31}$/
+
+/** Whether `name` is an acceptable Unix user name for "run as". */
+export function validRunAs(name: string): boolean {
+  return RUN_AS_RE.test(name)
+}
+
+/** " (as <user>)" suffix for tooltips; empty when the session isn't run as another user. */
+export function runAsSuffix(s: Pick<Session, 'runAs'>): string {
+  return s.runAs ? ` (as ${s.runAs})` : ''
 }
 
 /** Replace a leading home directory with `~`. */

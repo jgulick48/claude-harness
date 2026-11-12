@@ -39,6 +39,7 @@ import {
   displayPath,
   hostStatusText,
   reconnectText,
+  runAsSuffix,
   sessionLabel,
   trustKeyParams,
   truncateMiddle,
@@ -348,7 +349,7 @@ function RailView({
               const info = statusInfo(s)
               const isActive = active?.host === host.id && active.session === s.id
               const isOpen = !isActive && visible.has(`${host.id}/${s.id}`)
-              const text = info ? `${label} — ${info.label}` : label
+              const text = (info ? `${label} — ${info.label}` : label) + runAsSuffix(s)
               return (
                 <button
                   key={s.id}
@@ -852,6 +853,11 @@ export function Sidebar(): React.JSX.Element {
                           </span>
                         )}
                         {!s.managed && <span className="tag">external</span>}
+                        {s.runAs && (
+                          <span className="tag" title={`Runs as ${s.runAs}`}>
+                            as {s.runAs}
+                          </span>
+                        )}
                         <StatusBadge session={s} />
                       </div>
                       <div className="row-path" title={s.cwd}>

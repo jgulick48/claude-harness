@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canCreateOn, canReconnect, closedMessage, hostStatusText, trustKeyParams, displayPath, sessionLabel, sortSessions, truncateMiddle, type Session } from './sessions'
+import { canCreateOn, canReconnect, closedMessage, hostStatusText, trustKeyParams, displayPath, sessionLabel, validRunAs, runAsSuffix, sortSessions, truncateMiddle, type Session } from './sessions'
 
 const mk = (o: Partial<Session>): Session => ({
   id: '$1', name: 'h-x-1', harnessName: '', managed: true, cwd: '', windows: 1, attached: 0, created: 0, ...o
@@ -89,5 +89,16 @@ describe('host helpers', () => {
   it('closedMessage', () => {
     expect(closedMessage('connection lost', 'devbox')).toBe('Connection to devbox lost')
     expect(closedMessage('session ended', 'devbox')).toBe('Session ended')
+  })
+})
+
+describe('run as', () => {
+  it('validRunAs', () => {
+    for (const ok of ['deploy', '_svc', 'harness-e2e', 'a.b_c-1', 'a'.repeat(32)]) expect(validRunAs(ok)).toBe(true)
+    for (const bad of ['', 'bad name', '1abc', '-x', 'a'.repeat(33), 'a;b', 'a/b']) expect(validRunAs(bad)).toBe(false)
+  })
+  it('runAsSuffix', () => {
+    expect(runAsSuffix({ runAs: 'deploy' })).toBe(' (as deploy)')
+    expect(runAsSuffix({})).toBe('')
   })
 })

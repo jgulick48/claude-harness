@@ -24,10 +24,13 @@ import (
 
 // Options configures a local backend.
 type Options struct {
-	Bin          string // tmux binary; default "tmux"
-	Socket       string // tmux -L socket name; optional
-	Config       string // tmux -f config file; optional
-	Home         string // default os.UserHomeDir()
+	Bin    string // tmux binary; default "tmux"
+	Socket string // tmux -L socket name; optional
+	Config string // tmux -f config file; optional
+	Home   string // default os.UserHomeDir()
+	// Sudo is the sudo command run-as sessions type (default "sudo" on the
+	// session shell's PATH). Tests point it at a fake.
+	Sudo         string
 	PollInterval time.Duration
 	Logger       *slog.Logger
 }
@@ -42,6 +45,7 @@ type Backend struct {
 	id, name string
 	run      tmux.Runner
 	home     string
+	sudo     string
 	kind     string
 	ops      hostOps
 	poll     time.Duration
@@ -145,7 +149,7 @@ func newBackend(id, name string, run tmux.Runner, opts Options) *Backend {
 	}
 	return &Backend{
 		id: id, name: name, run: run, kind: session.KindLocal, ops: localOps{home: opts.Home},
-		home: opts.Home, poll: opts.PollInterval, log: opts.Logger,
+		home: opts.Home, sudo: opts.Sudo, poll: opts.PollInterval, log: opts.Logger,
 		subs:   map[int]func([]session.Session){},
 		kickCh: make(chan struct{}, 1),
 		terms:  map[*terminal]struct{}{},
@@ -245,7 +249,7 @@ func mapErr(err error, id string) error {
 var listFormat = strings.Join([]string{
 	"#{session_id}", "#{session_name}", "#{@harness_name}", "#{@harness_managed}",
 	"#{pane_current_path}", "#{session_windows}", "#{session_attached}", "#{session_created}",
-	"#{@claude_status}", "#{@claude_status_at}", "#{pane_current_command}",
+	"#{@claude_status}", "#{@claude_status_at}", "#{pane_current_command}", "#{@harness_run_as}",
 }, fieldSep)
 
 // shellCommands are pane commands that mean "no Claude here".
@@ -306,6 +310,9 @@ func (b *Backend) List(ctx context.Context) ([]session.Session, error) {
 				}
 			}
 		}
+		if len(f) >= 12 {
+			sess.RunAs = f[11]
+		}
 		list = append(list, sess)
 	}
 	sort.SliceStable(list, func(i, j int) bool { return list[i].Created < list[j].Created })
@@ -334,13 +341,22 @@ func (b *Backend) Create(ctx context.Context, opts session.CreateOptions) (sessi
 	default:
 		return session.Session{}, fmt.Errorf("%w: unknown command: %s", session.ErrBadRequest, opts.Command)
 	}
-	dir := b.expandDir(opts.Dir)
-	ok, err := b.ops.dirExists(ctx, dir)
-	if err != nil {
-		return session.Session{}, b.mapError(err, "")
+	if opts.RunAs != "" && !userNameRe.MatchString(opts.RunAs) {
+		return session.Session{}, fmt.Errorf("%w: invalid user name: %s", session.ErrBadRequest, opts.RunAs)
 	}
-	if !ok {
-		return session.Session{}, fmt.Errorf("%w: directory not found: %s", session.ErrBadRequest, dir)
+	dir := b.expandDir(opts.Dir)
+	if opts.RunAs != "" {
+		// The directory belongs to the target user, who may own paths the
+		// login user can't read: start in the login user's home and cd later.
+		dir = b.home
+	} else {
+		ok, err := b.ops.dirExists(ctx, dir)
+		if err != nil {
+			return session.Session{}, b.mapError(err, "")
+		}
+		if !ok {
+			return session.Session{}, fmt.Errorf("%w: directory not found: %s", session.ErrBadRequest, dir)
+		}
 	}
 
 	base := sanitizeName(opts.Name)
@@ -378,6 +394,9 @@ func (b *Backend) Create(ctx context.Context, opts session.CreateOptions) (sessi
 		{"set-option", "-t", id, "@harness_managed", "1"},
 		{"set-option", "-t", id, "window-size", "latest"},
 	}
+	if opts.RunAs != "" {
+		steps = append(steps, []string{"set-option", "-t", id, "@harness_run_as", opts.RunAs})
+	}
 	if opts.Name != "" {
 		steps = append(steps, []string{"set-option", "-t", id, "@harness_name", opts.Name})
 	}
@@ -390,7 +409,15 @@ func (b *Backend) Create(ctx context.Context, opts session.CreateOptions) (sessi
 	// while they start up (bash does on macOS), and until the shell is running
 	// tmux may report the server's cwd instead of the pane's.
 	b.waitShellReady(ctx, id)
-	if opts.Command == session.CommandClaude {
+	if opts.RunAs != "" {
+		line := runAsCommand(b.sudo, opts.RunAs, opts.Dir, opts.Command)
+		if _, err := b.run.Output(ctx, "send-keys", "-t", id, "-l", line); err != nil {
+			return fail(err)
+		}
+		if _, err := b.run.Output(ctx, "send-keys", "-t", id, "Enter"); err != nil {
+			return fail(err)
+		}
+	} else if opts.Command == session.CommandClaude {
 		// Typed into the shell rather than exec'd, so exiting Claude leaves a shell.
 		if _, err := b.run.Output(ctx, "send-keys", "-t", id, "-l", "claude"); err != nil {
 			return fail(err)
@@ -411,6 +438,36 @@ func (b *Backend) Create(ctx context.Context, opts session.CreateOptions) (sessi
 		}
 	}
 	return session.Session{}, fmt.Errorf("%w: %s", session.ErrNotFound, id)
+}
+
+var userNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9._-]{0,31}$`)
+
+// runAsCommand builds the line typed into a run-as session's shell: sudo -iu
+// <user> running a small script that cds to dir (interpreted as that user),
+// optionally starts claude, then leaves the user in their login shell. Not
+// exec'd, so a failing sudo leaves the login user's shell to retry in. sudo
+// "" means plain "sudo" from the shell's PATH.
+func runAsCommand(sudo, user, dir, command string) string {
+	inner := ""
+	notFound := func(d string) string {
+		return tmux.ShellQuote("harness: directory not found: " + d)
+	}
+	switch {
+	case dir == "" || dir == "~":
+	case strings.HasPrefix(dir, "~/"):
+		inner += `cd "$HOME"/` + tmux.ShellQuote(dir[2:]) + " || echo " + notFound(dir) + " >&2; "
+	default:
+		inner += "cd " + tmux.ShellQuote(dir) + " || echo " + notFound(dir) + " >&2; "
+	}
+	if command == session.CommandClaude {
+		inner += "claude; "
+	}
+	inner += `exec "$SHELL" -l`
+	bin := "sudo"
+	if sudo != "" {
+		bin = tmux.ShellQuote(sudo)
+	}
+	return bin + " -iu " + tmux.ShellQuote(user) + " -- sh -c " + tmux.ShellQuote(inner)
 }
 
 // shellReadyTimeout bounds waitShellReady; a shell with an empty prompt just

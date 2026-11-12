@@ -488,3 +488,38 @@ func TestWritePreservesOrderAcrossChunks(t *testing.T) {
 	var acc bytes.Buffer
 	readUntil(t, term, &acc, fmt.Sprintf("\r\n%s\r\n", strings.Repeat("0123456789", 60)))
 }
+
+func TestCreateRunAs(t *testing.T) {
+	b := newTestBackend(t)
+	bin := t.TempDir()
+	rec := filepath.Join(t.TempDir(), "user")
+	fake := "#!/bin/sh\n[ \"$1\" = -iu ] && [ \"$3\" = -- ] || exit 97\necho \"$2\" > " + rec + "\nshift 3\nexec \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "sudo"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// An absolute path, not a PATH entry: macOS login shells (path_helper)
+	// put the system directories, and the real sudo, first.
+	b.sudo = filepath.Join(bin, "sudo")
+	dir := t.TempDir()
+	if r, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = r
+	}
+	s := mustCreate(t, b, session.CreateOptions{Dir: dir, Command: session.CommandShell, RunAs: "bob"})
+	if s.RunAs != "bob" {
+		t.Errorf("RunAs = %q", s.RunAs)
+	}
+	waitFor(t, func() bool {
+		data, _ := os.ReadFile(rec)
+		return strings.TrimSpace(string(data)) == "bob"
+	})
+	waitFor(t, func() bool {
+		return tm(t, b, "display-message", "-p", "-t", s.ID, "#{pane_current_path}") == dir
+	})
+	list, err := b.List(context.Background())
+	if err != nil || len(list) != 1 || list[0].RunAs != "bob" || list[0].Cwd != dir {
+		t.Errorf("list = %+v, err = %v", list, err)
+	}
+	if _, err := b.Create(context.Background(), session.CreateOptions{RunAs: "bob;rm"}); !errors.Is(err, session.ErrBadRequest) {
+		t.Errorf("bad user: err = %v", err)
+	}
+}

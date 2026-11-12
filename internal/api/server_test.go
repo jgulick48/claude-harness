@@ -52,7 +52,7 @@ func TestHealthz(t *testing.T) {
 				if err := json.NewDecoder(resp.Body).Decode(&b); err != nil {
 					t.Fatal(err)
 				}
-				if b["ok"] != true || b["protocol"] != float64(6) {
+				if b["ok"] != true || b["protocol"] != float64(7) {
 					t.Fatalf("body %v", b)
 				}
 			}
@@ -116,7 +116,7 @@ func TestWSMessages(t *testing.T) {
 	c, ctx := dial(t, ts)
 
 	h := readMsg(t, ctx, c)
-	if h["type"] != "hello" || h["protocol"] != float64(6) || h["version"] == "" {
+	if h["type"] != "hello" || h["protocol"] != float64(7) || h["version"] == "" {
 		t.Fatalf("hello: %v", h)
 	}
 	if m := readMsg(t, ctx, c); m["event"] != "hosts.changed" || len(m["hosts"].([]any)) != 0 {

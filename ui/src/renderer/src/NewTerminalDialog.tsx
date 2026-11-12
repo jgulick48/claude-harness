@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useCore } from './CoreContext'
 import { DirCombo } from './DirCombo'
-import { canCreateOn, type Session } from './sessions'
+import { loadString, RUN_AS_KEY_PREFIX, saveString } from './prefs'
+import { canCreateOn, validRunAs, type Session } from './sessions'
 
 export function NewTerminalDialog({ preferredHost }: { preferredHost?: string }): React.JSX.Element {
   const { state, dispatch, client } = useCore()
@@ -11,6 +12,7 @@ export function NewTerminalDialog({ preferredHost }: { preferredHost?: string })
   const [host, setHost] = useState(initial)
   const [dir, setDir] = useState('~')
   const [name, setName] = useState('')
+  const [runAs, setRunAs] = useState(() => loadString(RUN_AS_KEY_PREFIX + initial))
   const [command, setCommand] = useState<'shell' | 'claude'>('shell')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -27,12 +29,19 @@ export function NewTerminalDialog({ preferredHost }: { preferredHost?: string })
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
     if (!client || !host || busy) return
+    const user = runAs.trim()
+    if (user && !validRunAs(user)) {
+      setError('Invalid user name')
+      return
+    }
     setBusy(true)
     setError(null)
     try {
       const params: Record<string, unknown> = { host, dir: dir.trim() || '~', command }
       if (name.trim()) params.name = name.trim()
+      if (user) params.runAs = user
       const s = await client.request<Session>('sessions.create', params)
+      saveString(RUN_AS_KEY_PREFIX + host, user)
       dispatch({ type: 'upsertSession', host, session: s })
       dispatch({ type: 'attach', ref: { host, session: s.id } })
       dispatch({ type: 'closeDialog' })
@@ -48,7 +57,13 @@ export function NewTerminalDialog({ preferredHost }: { preferredHost?: string })
         <h2>New terminal</h2>
         <label>
           Host
-          <select value={host} onChange={(e) => setHost(e.target.value)}>
+          <select
+            value={host}
+            onChange={(e) => {
+              setHost(e.target.value)
+              setRunAs(loadString(RUN_AS_KEY_PREFIX + e.target.value))
+            }}
+          >
             {usable.map((h) => (
               <option key={h.id} value={h.id}>
                 {h.name}
@@ -67,6 +82,21 @@ export function NewTerminalDialog({ preferredHost }: { preferredHost?: string })
             onChange={(e) => setName(e.target.value)}
             placeholder="Leave empty to show the directory"
           />
+        </label>
+        <label>
+          Run as user (optional)
+          <input
+            value={runAs}
+            onChange={(e) => setRunAs(e.target.value)}
+            placeholder="e.g. deploy"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          <span className="field-hint">
+            Switches with sudo -iu &lt;user&gt;. The directory is that user&apos;s; sudo may ask for a password in the
+            terminal.
+          </span>
         </label>
         <fieldset>
           <legend>Command</legend>

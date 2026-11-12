@@ -253,6 +253,11 @@ export function TerminalPane({ paneId, focused, host, sessionId, session, hostNa
       <header className="term-header">
         <span className="term-titleline">
           <span className="term-title">{session ? sessionLabel(session) : sessionId}</span>
+          {session?.runAs && (
+            <span className="tag" title={`Runs as ${session.runAs}`}>
+              as {session.runAs}
+            </span>
+          )}
           {session && <StatusBadge session={session} />}
           <span className="term-host">{hostName}</span>
           <button

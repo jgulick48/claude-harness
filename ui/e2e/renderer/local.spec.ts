@@ -10,7 +10,7 @@ const local = (page: import('@playwright/test').Page) =>
   page.getByTestId('host-group').filter({ hasText: 'This computer' })
 
 test('app loads and the local host is connected', async ({ page }) => {
-  await expect(page.getByText(/^Core:/)).toHaveText(/Core: connected · v\S+ · protocol 6/)
+  await expect(page.getByText(/^Core:/)).toHaveText(/Core: connected · v\S+ · protocol 7/)
   await expect(local(page).getByLabel('connected', { exact: true })).toBeVisible()
   await expect(page.getByText('No sessions')).toBeVisible()
 })
@@ -144,4 +144,38 @@ test('host group collapse survives a reload', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Expand This computer' }).click()
   await expect(page.getByRole('button', { name: /fold-me/ })).toBeVisible()
+})
+
+test('run as: an invalid user name is rejected before anything is created', async ({ page }) => {
+  const rows = page.locator('.row-label')
+  // Wait for the session list to load (either empty or with rows) before counting.
+  await expect(page.getByText('No sessions').or(rows.first())).toBeVisible()
+  const before = await rows.count()
+  await page.getByRole('button', { name: 'New terminal', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'New terminal' })
+  await dialog.getByLabel('Run as user (optional)').fill('bad name')
+  await dialog.getByRole('button', { name: 'Create' }).click()
+  await expect(dialog.getByRole('alert')).toHaveText('Invalid user name')
+  await expect(dialog).toBeVisible()
+  await expect(rows).toHaveCount(before)
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+})
+
+test('run as: a session as another user (fake sudo) shows the tag and starts in that directory', async ({ page }, info) => {
+  await page.getByRole('button', { name: 'New terminal', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'New terminal' })
+  await dialog.getByRole('combobox', { name: 'Directory' }).fill('~/proj/beta')
+  await dialog.getByLabel('Name (optional)').fill('as-other')
+  await dialog.getByLabel('Run as user (optional)').fill('harness-e2e')
+  await shot(page, info, 'new-terminal-run-as')
+  await dialog.getByRole('button', { name: 'Create' }).click()
+  await expect(dialog).toBeHidden()
+
+  const row = page.getByRole('button', { name: /as-other/ })
+  await expect(row).toBeVisible()
+  await expect(row).toContainText('as harness-e2e')
+  await expect(page.getByTestId('terminal-pane').locator('.tag')).toHaveText('as harness-e2e')
+  await runInTerminal(page, 'pwd', join(env().core.home, 'proj/beta'))
+  await shot(page, info, 'run-as-session')
 })

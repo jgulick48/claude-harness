@@ -158,6 +158,12 @@ tmux set-option -t <id> @harness_managed 1
   otherwise it's generated (e.g. `h-<dir-basename>-<n>`). tmux session names
   must be unique and cannot contain `.` or `:`.
 - `<command>` is empty (login shell) or `claude`.
+- Run-as variant: with `runAs`, tmux still runs as the login user and the
+  session starts in the login user's home (the directory is not checked, since
+  it belongs to the target user). After the shell is ready the core sets
+  `@harness_run_as <user>` and types
+  `sudo -iu <user> -- sh -c '<cd dir; [claude;] exec "$SHELL" -l>'`; sudo asks
+  for a password in the terminal if needed.
 
 ### 4.3 Attaching
 
