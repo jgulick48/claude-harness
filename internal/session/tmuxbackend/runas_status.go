@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jgulick48/claude-harness/internal/claudehooks"
 	"github.com/jgulick48/claude-harness/internal/tmux"
@@ -198,4 +199,94 @@ func (b *Backend) removeStatusFile(ctx context.Context, p string) {
 			b.log.Debug("removing status file failed", "err", err)
 		}
 	}
+}
+
+// Sweeping: status files of sessions that ended without Kill (the user typed
+// exit, the tmux server died, the host rebooted with /tmp kept) are never
+// removed by Kill, so List periodically deletes the ones no live session
+// references. The grace period keeps a file safe while its session is being
+// created; deleting a file that is still in use (a session on another tmux
+// socket of the same user) is harmless: the hook recreates it on the next event.
+const (
+	statusSweepEvery = 10 * time.Minute
+	statusSweepGrace = 60 // minutes since last write
+)
+
+// sweepNameRe matches status files and the hook's temp files (<file>.<pid>).
+var sweepNameRe = regexp.MustCompile(`^([0-9a-f]{32})(\.[0-9]+)?$`)
+
+// maybeSweepStatusFiles starts a background sweep if one is due. referenced
+// holds every status file named by a session of a successful list.
+func (b *Backend) maybeSweepStatusFiles(referenced []string) {
+	b.statusMu.Lock()
+	due := !b.sweeping && time.Since(b.lastSweep) >= statusSweepEvery
+	if due {
+		b.sweeping, b.lastSweep = true, time.Now()
+	}
+	b.statusMu.Unlock()
+	if !due {
+		return
+	}
+	go func() {
+		defer func() {
+			b.statusMu.Lock()
+			b.sweeping = false
+			b.statusMu.Unlock()
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if n, err := b.sweepStatusFiles(ctx, referenced); err != nil {
+			b.log.Debug("sweeping status files failed", "err", err)
+		} else if n > 0 {
+			b.log.Info("removed stale run-as status files", "count", n)
+		}
+	}()
+}
+
+// sweepStatusFiles deletes status files older than the grace period that are
+// not in referenced, returning how many it removed.
+func (b *Backend) sweepStatusFiles(ctx context.Context, referenced []string) (int, error) {
+	ops, ok := b.ops.(shellOps)
+	if !ok {
+		return 0, nil
+	}
+	dir, err := b.resolveStatusDir(ctx)
+	if err != nil {
+		return 0, err
+	}
+	q := tmux.ShellQuote(dir)
+	// Only a directory we own (it is shared with the run-as users); -type f
+	// without -L skips symlinks and anything that isn't a regular file.
+	out, err := ops.shell(ctx, `[ -d `+q+` ] && [ ! -L `+q+` ] && [ -O `+q+` ] || exit 0
+find `+q+` -maxdepth 1 -type f -mmin +`+strconv.Itoa(statusSweepGrace)+` -print`)
+	if err != nil {
+		return 0, err
+	}
+	keep := map[string]bool{}
+	for _, p := range referenced {
+		keep[p] = true
+	}
+	var rm []string
+	for _, p := range strings.Split(string(out), "\n") {
+		if !strings.HasPrefix(p, dir+"/") {
+			continue
+		}
+		m := sweepNameRe.FindStringSubmatch(p[len(dir)+1:])
+		if m == nil {
+			continue
+		}
+		// A referenced file stays however old (Claude idle for hours); its
+		// leftover temp files go.
+		if m[2] == "" && keep[p] {
+			continue
+		}
+		rm = append(rm, tmux.ShellQuote(p))
+	}
+	if len(rm) == 0 {
+		return 0, nil
+	}
+	if _, err := ops.shell(ctx, "rm -f -- "+strings.Join(rm, " ")); err != nil {
+		return 0, err
+	}
+	return len(rm), nil
 }
