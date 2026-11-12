@@ -497,8 +497,9 @@ func TestCreateRunAs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bin, "sudo"), []byte(fake), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// The tmux server starts on the first Create and inherits this PATH.
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// An absolute path, not a PATH entry: macOS login shells (path_helper)
+	// put the system directories, and the real sudo, first.
+	b.sudo = filepath.Join(bin, "sudo")
 	dir := t.TempDir()
 	if r, err := filepath.EvalSymlinks(dir); err == nil {
 		dir = r

@@ -24,10 +24,13 @@ import (
 
 // Options configures a local backend.
 type Options struct {
-	Bin          string // tmux binary; default "tmux"
-	Socket       string // tmux -L socket name; optional
-	Config       string // tmux -f config file; optional
-	Home         string // default os.UserHomeDir()
+	Bin    string // tmux binary; default "tmux"
+	Socket string // tmux -L socket name; optional
+	Config string // tmux -f config file; optional
+	Home   string // default os.UserHomeDir()
+	// Sudo is the sudo command run-as sessions type (default "sudo" on the
+	// session shell's PATH). Tests point it at a fake.
+	Sudo         string
 	PollInterval time.Duration
 	Logger       *slog.Logger
 }
@@ -42,6 +45,7 @@ type Backend struct {
 	id, name string
 	run      tmux.Runner
 	home     string
+	sudo     string
 	kind     string
 	ops      hostOps
 	poll     time.Duration
@@ -145,7 +149,7 @@ func newBackend(id, name string, run tmux.Runner, opts Options) *Backend {
 	}
 	return &Backend{
 		id: id, name: name, run: run, kind: session.KindLocal, ops: localOps{home: opts.Home},
-		home: opts.Home, poll: opts.PollInterval, log: opts.Logger,
+		home: opts.Home, sudo: opts.Sudo, poll: opts.PollInterval, log: opts.Logger,
 		subs:   map[int]func([]session.Session){},
 		kickCh: make(chan struct{}, 1),
 		terms:  map[*terminal]struct{}{},
@@ -406,7 +410,7 @@ func (b *Backend) Create(ctx context.Context, opts session.CreateOptions) (sessi
 	// tmux may report the server's cwd instead of the pane's.
 	b.waitShellReady(ctx, id)
 	if opts.RunAs != "" {
-		line := runAsCommand(opts.RunAs, opts.Dir, opts.Command)
+		line := runAsCommand(b.sudo, opts.RunAs, opts.Dir, opts.Command)
 		if _, err := b.run.Output(ctx, "send-keys", "-t", id, "-l", line); err != nil {
 			return fail(err)
 		}
@@ -441,8 +445,9 @@ var userNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9._-]{0,31}$`)
 // runAsCommand builds the line typed into a run-as session's shell: sudo -iu
 // <user> running a small script that cds to dir (interpreted as that user),
 // optionally starts claude, then leaves the user in their login shell. Not
-// exec'd, so a failing sudo leaves the login user's shell to retry in.
-func runAsCommand(user, dir, command string) string {
+// exec'd, so a failing sudo leaves the login user's shell to retry in. sudo
+// "" means plain "sudo" from the shell's PATH.
+func runAsCommand(sudo, user, dir, command string) string {
 	inner := ""
 	notFound := func(d string) string {
 		return tmux.ShellQuote("harness: directory not found: " + d)
@@ -458,7 +463,11 @@ func runAsCommand(user, dir, command string) string {
 		inner += "claude; "
 	}
 	inner += `exec "$SHELL" -l`
-	return "sudo -iu " + tmux.ShellQuote(user) + " -- sh -c " + tmux.ShellQuote(inner)
+	bin := "sudo"
+	if sudo != "" {
+		bin = tmux.ShellQuote(sudo)
+	}
+	return bin + " -iu " + tmux.ShellQuote(user) + " -- sh -c " + tmux.ShellQuote(inner)
 }
 
 // shellReadyTimeout bounds waitShellReady; a shell with an empty prompt just

@@ -195,9 +195,12 @@ func TestRunAsCommand(t *testing.T) {
 		{"bob", "/o'x", "shell", `sudo -iu 'bob' -- sh -c 'cd '\''/o'\''\'\'''\''x'\'' || echo '\''harness: directory not found: /o'\''\'\'''\''x'\'' >&2; exec "$SHELL" -l'`},
 	}
 	for _, tc := range tests {
-		if got := runAsCommand(tc.user, tc.dir, tc.cmd); got != tc.want {
+		if got := runAsCommand("", tc.user, tc.dir, tc.cmd); got != tc.want {
 			t.Errorf("runAsCommand(%q,%q,%q)\n got  %s\n want %s", tc.user, tc.dir, tc.cmd, got, tc.want)
 		}
+	}
+	if got, want := runAsCommand("/opt/my sudo", "bob", "", "shell"), `'/opt/my sudo' -iu 'bob' -- sh -c 'exec "$SHELL" -l'`; got != want {
+		t.Errorf("custom sudo:\n got  %s\n want %s", got, want)
 	}
 }
 

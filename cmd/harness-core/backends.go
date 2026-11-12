@@ -22,6 +22,8 @@ import (
 //	                     server); applies to the local host and to SSH hosts
 //	HARNESS_TMUX_CONFIG  tmux config file, passed as -f (e.g. /dev/null to skip
 //	                     ~/.tmux.conf); applies to the local host and SSH hosts
+//	HARNESS_SUDO         sudo command typed into run-as sessions (default "sudo"
+//	                     on the session shell's PATH); local and SSH hosts
 //	HARNESS_HOSTS_FILE   saved SSH hosts (default <user config dir>/claude-harness/hosts.json)
 //	HARNESS_STATE_FILE   recent directories per host (default <user config dir>/claude-harness/state.json)
 //	HARNESS_SSH_CONFIG   ssh config file (default ~/.ssh/config)
@@ -35,6 +37,7 @@ func newHostManager(logger *slog.Logger, getenv func(string) string) session.Hos
 	tmuxOpts := tmuxbackend.Options{
 		Socket: getenv("HARNESS_TMUX_SOCKET"),
 		Config: getenv("HARNESS_TMUX_CONFIG"),
+		Sudo:   getenv("HARNESS_SUDO"),
 	}
 	localOpts := tmuxOpts
 	localOpts.Bin = getenv("HARNESS_TMUX_BIN")

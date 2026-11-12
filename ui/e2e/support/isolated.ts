@@ -113,11 +113,11 @@ function pathWithoutClaude(): string {
 }
 
 /**
- * A directory holding a fake `sudo` (plain POSIX sh) for the run-as scenarios.
+ * Writes a fake `sudo` (plain POSIX sh) for the run-as scenarios and returns its path.
  * It insists on `-iu <user> --`, then runs the rest as the current user, so the
  * fixture HOME and PATH carry over. Only matters when something invokes sudo.
  */
-function fakeSudoDir(dir: string): string {
+function fakeSudo(dir: string): string {
   const bin = join(dir, 'fakebin')
   mkdirSync(bin, { recursive: true })
   const script = join(bin, 'sudo')
@@ -133,7 +133,7 @@ exec "$@"
 `
   )
   chmodSync(script, 0o755)
-  return bin
+  return script
 }
 
 /**
@@ -156,7 +156,10 @@ export function isolatedEnv(dir: string, home: string, socket: string, agentSock
     HARNESS_KNOWN_HOSTS: knownHosts,
     SSH_AUTH_SOCK: agentSock,
     HOME: home,
-    PATH: fakeSudoDir(dir) + delimiter + pathWithoutClaude(),
+    PATH: pathWithoutClaude(),
+    // An absolute path rather than a PATH entry: macOS login shells
+    // (path_helper) move the system directories, and the real sudo, first.
+    HARNESS_SUDO: fakeSudo(dir),
     // Pin Claude Code's config dir to the fixture: if the developer's shell
     // exports CLAUDE_CONFIG_DIR, the hook installer would otherwise write to
     // their real Claude settings.
