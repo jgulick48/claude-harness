@@ -93,6 +93,7 @@ test('Ctrl+2 attaches the second session; arrows and Enter navigate rows', async
   await expect(page.locator('.xterm-helper-textarea').first()).toBeFocused()
 
   await page.keyboard.press(keys.filter)
+  await expect(filter(page)).toBeFocused() // the shortcut lands before typing
   await page.keyboard.press('ArrowDown')
   await expect(rows(page).nth(0)).toBeFocused()
   await page.keyboard.press('ArrowDown')
@@ -110,9 +111,11 @@ test('Ctrl+2 attaches the second session; arrows and Enter navigate rows', async
 test('a finishing attach does not steal focus from the filter', async ({ page }) => {
   await focusTerminal(page)
   await page.keyboard.press(keys.filter)
+  await expect(filter(page)).toBeFocused() // the shortcut lands before typing
   await page.keyboard.type('gamma')
   await page.keyboard.press('Enter') // attach starts; don't wait for it
   await page.keyboard.press(keys.filter)
+  await expect(filter(page)).toBeFocused() // the shortcut lands before typing
   await page.keyboard.type('alp')
   // The gamma row is filtered out by now, so check the attached pane's header.
   await expect(page.locator('.pane-leaf').first()).toContainText('gamma-docs')
