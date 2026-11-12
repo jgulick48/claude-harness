@@ -185,3 +185,31 @@ func TestExpandDirAndBadCommand(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestRunAsCommand(t *testing.T) {
+	tests := []struct{ user, dir, cmd, want string }{
+		{"bob", "", "shell", `sudo -iu 'bob' -- sh -c 'exec "$SHELL" -l'`},
+		{"bob", "~", "claude", `sudo -iu 'bob' -- sh -c 'claude; exec "$SHELL" -l'`},
+		{"bob", "~/src/app", "claude", `sudo -iu 'bob' -- sh -c 'cd "$HOME"/'\''src/app'\'' || echo '\''harness: directory not found: ~/src/app'\'' >&2; claude; exec "$SHELL" -l'`},
+		{"bob", "~/sub dir", "shell", `sudo -iu 'bob' -- sh -c 'cd "$HOME"/'\''sub dir'\'' || echo '\''harness: directory not found: ~/sub dir'\'' >&2; exec "$SHELL" -l'`},
+		{"bob", "/o'x", "shell", `sudo -iu 'bob' -- sh -c 'cd '\''/o'\''\'\'''\''x'\'' || echo '\''harness: directory not found: /o'\''\'\'''\''x'\'' >&2; exec "$SHELL" -l'`},
+	}
+	for _, tc := range tests {
+		if got := runAsCommand(tc.user, tc.dir, tc.cmd); got != tc.want {
+			t.Errorf("runAsCommand(%q,%q,%q)\n got  %s\n want %s", tc.user, tc.dir, tc.cmd, got, tc.want)
+		}
+	}
+}
+
+func TestUserNameValidation(t *testing.T) {
+	for _, ok := range []string{"bob", "svc_app", "a.b-c", "_x", strings.Repeat("a", 32)} {
+		if !userNameRe.MatchString(ok) {
+			t.Errorf("%q should be valid", ok)
+		}
+	}
+	for _, bad := range []string{"", "-rf", "bob;rm", "a b", "$(x)", strings.Repeat("a", 33), "1bob"} {
+		if userNameRe.MatchString(bad) {
+			t.Errorf("%q should be invalid", bad)
+		}
+	}
+}

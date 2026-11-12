@@ -43,3 +43,19 @@ describe('prefs flags', () => {
     expect(() => saveFlag('k', true, bad)).not.toThrow()
   })
 })
+
+describe('string prefs', () => {
+  it('round-trips and survives throwing storage', async () => {
+    const { loadString, saveString } = await import('./prefs')
+    const m = new Map<string, string>()
+    const st = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) }
+    expect(loadString('k', '', () => st)).toBe('')
+    saveString('k', 'deploy', () => st)
+    expect(loadString('k', '', () => st)).toBe('deploy')
+    const boom = () => {
+      throw new Error('no')
+    }
+    expect(loadString('k', 'f', () => ({ getItem: boom, setItem: boom }))).toBe('f')
+    expect(() => saveString('k', 'x', () => ({ getItem: boom, setItem: boom }))).not.toThrow()
+  })
+})

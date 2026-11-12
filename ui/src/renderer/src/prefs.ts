@@ -5,6 +5,8 @@ export const NOTIFICATIONS_KEY = 'harness.notifications'
 export const SIDEBAR_RAIL_KEY = 'harness.sidebarRail'
 export const SIDEBAR_WIDTH_KEY = 'harness.sidebarWidth'
 
+export const RUN_AS_KEY_PREFIX = 'harness.runAs.'
+
 export type StorageLike = Pick<Storage, 'getItem' | 'setItem'>
 
 function defaultStorage(): StorageLike | null {
@@ -51,6 +53,23 @@ export function loadNumber(key: string, fallback: number, getStorage: () => Stor
 export function saveNumber(key: string, v: number, getStorage: () => StorageLike | null = defaultStorage): void {
   try {
     getStorage()?.setItem(key, String(v))
+  } catch {
+    /* app works without persistence */
+  }
+}
+
+/** Reads a string pref, falling back when missing or storage throws. */
+export function loadString(key: string, fallback = '', getStorage: () => StorageLike | null = defaultStorage): string {
+  try {
+    return getStorage()?.getItem(key) ?? fallback
+  } catch {
+    return fallback
+  }
+}
+
+export function saveString(key: string, v: string, getStorage: () => StorageLike | null = defaultStorage): void {
+  try {
+    getStorage()?.setItem(key, v)
   } catch {
     /* app works without persistence */
   }

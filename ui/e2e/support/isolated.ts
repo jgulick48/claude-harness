@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { startCore, type RunningCore } from '../../src/main/core'
@@ -113,6 +113,30 @@ function pathWithoutClaude(): string {
 }
 
 /**
+ * A directory holding a fake `sudo` (plain POSIX sh) for the run-as scenarios.
+ * It insists on `-iu <user> --`, then runs the rest as the current user, so the
+ * fixture HOME and PATH carry over. Only matters when something invokes sudo.
+ */
+function fakeSudoDir(dir: string): string {
+  const bin = join(dir, 'fakebin')
+  mkdirSync(bin, { recursive: true })
+  const script = join(bin, 'sudo')
+  writeFileSync(
+    script,
+    `#!/bin/sh
+if [ "$1" != "-iu" ] || [ -z "$2" ] || [ "$3" != "--" ]; then
+  echo "fake sudo: unexpected args: $*" >&2
+  exit 64
+fi
+shift 3
+exec "$@"
+`
+  )
+  chmodSync(script, 0o755)
+  return bin
+}
+
+/**
  * Builds the isolated environment every e2e core runs in: private tmux socket
  * and no tmux config, fresh hosts/state/ssh-config/known_hosts files, a
  * fixture HOME, and either no SSH agent or sshtestd's.
@@ -132,7 +156,7 @@ export function isolatedEnv(dir: string, home: string, socket: string, agentSock
     HARNESS_KNOWN_HOSTS: knownHosts,
     SSH_AUTH_SOCK: agentSock,
     HOME: home,
-    PATH: pathWithoutClaude(),
+    PATH: fakeSudoDir(dir) + delimiter + pathWithoutClaude(),
     // Pin Claude Code's config dir to the fixture: if the developer's shell
     // exports CLAUDE_CONFIG_DIR, the hook installer would otherwise write to
     // their real Claude settings.

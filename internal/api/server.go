@@ -388,6 +388,7 @@ type params struct {
 	Target      string          `json:"target"`
 	Fingerprint string          `json:"fingerprint"`
 	Command     string          `json:"command"`
+	RunAs       string          `json:"runAs"`
 	Cols        json.RawMessage `json:"cols"`
 	Rows        json.RawMessage `json:"rows"`
 	Stream      json.RawMessage `json:"stream"`
@@ -556,7 +557,7 @@ func (cn *conn) call(method string, id int64, p *params) (any, error) {
 		}
 		return list, nil
 	case "sessions.create":
-		sess, err := b.Create(ctx, session.CreateOptions{Dir: p.Dir, Name: p.Name, Command: p.Command})
+		sess, err := b.Create(ctx, session.CreateOptions{Dir: p.Dir, Name: p.Name, Command: p.Command, RunAs: p.RunAs})
 		if err != nil {
 			return nil, err
 		}

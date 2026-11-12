@@ -72,11 +72,12 @@ type HostKeyPrompt struct {
 
 // Session is one tmux session.
 type Session struct {
-	ID          string `json:"id"`          // tmux session_id, e.g. "$3" (stable across renames)
-	Name        string `json:"name"`        // tmux session_name
-	HarnessName string `json:"harnessName"` // user-chosen display name (@harness_name); "" if none
-	Managed     bool   `json:"managed"`     // created by this app (@harness_managed=1)
-	Cwd         string `json:"cwd"`         // active pane's current path
+	ID          string `json:"id"`              // tmux session_id, e.g. "$3" (stable across renames)
+	Name        string `json:"name"`            // tmux session_name
+	HarnessName string `json:"harnessName"`     // user-chosen display name (@harness_name); "" if none
+	Managed     bool   `json:"managed"`         // created by this app (@harness_managed=1)
+	RunAs       string `json:"runAs,omitempty"` // @harness_run_as: user the session switched to
+	Cwd         string `json:"cwd"`             // active pane's current path
 	Windows     int    `json:"windows"`
 	Attached    int    `json:"attached"` // tmux clients attached, including ours
 	Created     int64  `json:"created"`  // unix seconds
@@ -112,6 +113,7 @@ type CreateOptions struct {
 	Dir     string // absolute path or "~"/"~/..." (expanded on the host); "" means home
 	Name    string // optional display name
 	Command string // CommandShell (default when "") or CommandClaude
+	RunAs   string // optional: switch to this user with sudo -iu inside the session
 }
 
 // Backend is one host's session provider. All methods are safe for concurrent use.
