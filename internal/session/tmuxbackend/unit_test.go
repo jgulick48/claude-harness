@@ -195,12 +195,71 @@ func TestRunAsCommand(t *testing.T) {
 		{"bob", "/o'x", "shell", `sudo -iu 'bob' -- sh -c 'cd '\''/o'\''\'\'''\''x'\'' || echo '\''harness: directory not found: /o'\''\'\'''\''x'\'' >&2; exec "$SHELL" -l'`},
 	}
 	for _, tc := range tests {
-		if got := runAsCommand("", tc.user, tc.dir, tc.cmd); got != tc.want {
+		if got := runAsCommand("", tc.user, tc.dir, tc.cmd, "", ""); got != tc.want {
 			t.Errorf("runAsCommand(%q,%q,%q)\n got  %s\n want %s", tc.user, tc.dir, tc.cmd, got, tc.want)
 		}
 	}
-	if got, want := runAsCommand("/opt/my sudo", "bob", "", "shell"), `'/opt/my sudo' -iu 'bob' -- sh -c 'exec "$SHELL" -l'`; got != want {
+	if got, want := runAsCommand("/opt/my sudo", "bob", "", "shell", "", ""), `'/opt/my sudo' -iu 'bob' -- sh -c 'exec "$SHELL" -l'`; got != want {
 		t.Errorf("custom sudo:\n got  %s\n want %s", got, want)
+	}
+}
+
+func TestRunAsCommandStatus(t *testing.T) {
+	file := "/tmp/claude-harness-status-1000/0123456789abcdef0123456789abcdef"
+	settings := "/tmp/claude-harness-status-1000/settings-v2.json"
+	tests := []struct{ sudo, dir, cmd, want string }{
+		{"", "~/src/app", "claude", `sudo -iu 'bob' -- env HARNESS_STATUS_FILE='` + file + `' sh -c 'cd "$HOME"/'\''src/app'\'' || echo '\''harness: directory not found: ~/src/app'\'' >&2; claude --settings '\''` + settings + `'\''; exec "$SHELL" -l'`},
+		{"", "", "shell", `sudo -iu 'bob' -- env HARNESS_STATUS_FILE='` + file + `' sh -c 'exec "$SHELL" -l'`},
+		{"/opt/my sudo", "", "claude", `'/opt/my sudo' -iu 'bob' -- env HARNESS_STATUS_FILE='` + file + `' sh -c 'claude --settings '\''` + settings + `'\''; exec "$SHELL" -l'`},
+	}
+	for _, tc := range tests {
+		if got := runAsCommand(tc.sudo, "bob", tc.dir, tc.cmd, file, settings); got != tc.want {
+			t.Errorf("runAsCommand(%q,%q)\n got  %s\n want %s", tc.dir, tc.cmd, got, tc.want)
+		}
+	}
+}
+
+func TestStatusFileHelpers(t *testing.T) {
+	d := "/tmp/claude-harness-status-1000"
+	tok := "0123456789abcdef0123456789abcdef"
+	for p, want := range map[string]bool{
+		d + "/" + tok:                  true,
+		d + "/" + tok + "0":            false,
+		d + "/" + tok[:31]:             false,
+		d + "/../" + tok:               false,
+		d + "/x/" + tok:                false,
+		"/etc/" + tok:                  false,
+		d + "/" + strings.ToUpper(tok): false,
+		d + "/hook-v2.sh":              false,
+		"":                             false,
+	} {
+		if got := validStatusFile(d, p); got != want {
+			t.Errorf("validStatusFile(%q) = %v", p, got)
+		}
+	}
+	if validStatusFile("", "/"+tok) {
+		t.Error("empty dir accepted")
+	}
+	for in, want := range map[string]struct {
+		state string
+		at    int64
+		ok    bool
+	}{
+		"working 1794420400": {"working", 1794420400, true},
+		" idle 5 \n":         {"idle", 5, true},
+		"":                   {},
+		"working":            {},
+		"working x":          {},
+		"working 0":          {},
+		"working 1 extra":    {},
+	} {
+		st, at, ok := parseStatusFile(in)
+		if st != want.state || at != want.at || ok != want.ok {
+			t.Errorf("parseStatusFile(%q) = %q %d %v", in, st, at, ok)
+		}
+	}
+	if len(newStatusToken()) != 32 || !statusFileNameRe.MatchString(newStatusToken()) {
+		t.Error("bad token")
 	}
 }
 

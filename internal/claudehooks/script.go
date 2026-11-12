@@ -5,7 +5,7 @@ package claudehooks
 
 // Version is the script version; bump it whenever Script changes so installed
 // copies show up as outdated.
-const Version = 1
+const Version = 2
 
 // Events lists every Claude Code hook event we register the script for.
 var Events = []string{
@@ -24,12 +24,13 @@ var Events = []string{
 // script is the POSIX sh hook. It must never write to stdout (Claude injects
 // it into context on some events) and must always exit 0 (exit 2 blocks).
 const script = `#!/bin/sh
-# claude-harness-status v1
-# Claude Code hook: records Claude's state in the tmux session options
-# @claude_status and @claude_status_at. Always exits 0 and prints nothing.
+# claude-harness-status v2
+# Claude Code hook: records Claude's state in the file $HARNESS_STATUS_FILE
+# when set (run-as sessions), else in the tmux session options @claude_status
+# and @claude_status_at. Always exits 0 and prints nothing.
 exec >/dev/null 2>&1
 input=$(cat)
-[ -n "$TMUX" ] && [ -n "$TMUX_PANE" ] || exit 0
+[ -n "$HARNESS_STATUS_FILE" ] || { [ -n "$TMUX" ] && [ -n "$TMUX_PANE" ]; } || exit 0
 
 # field NAME: first string value of "NAME" in the JSON on stdin.
 field() {
@@ -51,6 +52,17 @@ Notification)
 	;;
 *) exit 0 ;;
 esac
+
+if [ -n "$HARNESS_STATUS_FILE" ]; then
+	if [ "$event" = SessionEnd ]; then
+		: >"$HARNESS_STATUS_FILE"
+	else
+		tmp="$HARNESS_STATUS_FILE.$$"
+		printf '%s %s\n' "$state" "$(date +%s)" >"$tmp" &&
+			chmod 644 "$tmp" && mv -f "$tmp" "$HARNESS_STATUS_FILE" || rm -f "$tmp"
+	fi
+	exit 0
+fi
 
 tmux=$(command -v tmux)
 if [ -z "$tmux" ]; then

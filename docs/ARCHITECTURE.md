@@ -162,8 +162,14 @@ tmux set-option -t <id> @harness_managed 1
   session starts in the login user's home (the directory is not checked, since
   it belongs to the target user). After the shell is ready the core sets
   `@harness_run_as <user>` and types
-  `sudo -iu <user> -- sh -c '<cd dir; [claude;] exec "$SHELL" -l>'`; sudo asks
-  for a password in the terminal if needed.
+  `sudo -iu <user> -- env HARNESS_STATUS_FILE=<file> sh -c '<cd dir; [claude --settings <settings>;] exec "$SHELL" -l>'`;
+  sudo asks for a password in the terminal if needed. Claude status can't use
+  tmux options there (Claude can't reach the login user's tmux), so the core
+  keeps a `1733` status directory (`/tmp/claude-harness-status-<uid>`) holding
+  the hook script, a hooks-only settings file and one status file per run-as
+  session (`@harness_status_file`). The v2 hook writes `<state> <epoch>` to
+  `$HARNESS_STATUS_FILE`; `List` reads all such files in one exec. See
+  CORE_PROTOCOL.md §5.2.
 
 ### 4.3 Attaching
 
@@ -305,7 +311,10 @@ response**, or **idle** in each session, without scraping the screen.
   - runs `tmux set-option -q -t "$TMUX_PANE" @claude_status <state>` and sets
     `@claude_status_at`, or unsets both on `SessionEnd`.
 
-  It does nothing outside tmux (no `$TMUX`/`$TMUX_PANE`), **always exits 0, and
+  If `$HARNESS_STATUS_FILE` is set (run-as sessions, §4.2) it writes
+  `<state> <epoch>` to that file instead, and `SessionEnd` empties it.
+
+  It does nothing outside tmux without that variable (no `$TMUX`/`$TMUX_PANE`), **always exits 0, and
   never writes to stdout**. Claude Code injects hook stdout into context on some
   events, and exit 2 blocks, so the script must never do either.
 - **The installer.** It merges one hook entry per event into the user settings

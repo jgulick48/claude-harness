@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jgulick48/claude-harness/internal/claudehooks"
 	"github.com/jgulick48/claude-harness/internal/session"
 )
 
@@ -31,7 +32,7 @@ func newTestBackend(t *testing.T) *Backend {
 	rand.Read(rb)
 	opts := Options{
 		Socket: "harness-test-" + hex.EncodeToString(rb), Config: "/dev/null",
-		Home: t.TempDir(), PollInterval: 100 * time.Millisecond,
+		Home: t.TempDir(), StatusDir: filepath.Join(t.TempDir(), "status"), PollInterval: 100 * time.Millisecond,
 	}
 	b := NewLocal(opts)
 	if h := b.Host(context.Background()); h.State != session.HostConnected {
@@ -521,5 +522,118 @@ func TestCreateRunAs(t *testing.T) {
 	}
 	if _, err := b.Create(context.Background(), session.CreateOptions{RunAs: "bob;rm"}); !errors.Is(err, session.ErrBadRequest) {
 		t.Errorf("bad user: err = %v", err)
+	}
+}
+
+func TestRunAsClaudeStatus(t *testing.T) {
+	b := newTestBackend(t)
+	bin, cbin := t.TempDir(), t.TempDir()
+	// The fake sudo puts the fake claude first on PATH itself: login shells
+	// (/etc/profile, macOS path_helper) rewrite PATH, so a PATH set by the
+	// test would not survive to the typed command.
+	fakeSudo := "#!/bin/sh\n[ \"$1\" = -iu ] && [ \"$3\" = -- ] || exit 97\nshift 3\nPATH=" + cbin + ":$PATH\nexport PATH\nexec \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "sudo"), []byte(fakeSudo), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b.sudo = filepath.Join(bin, "sudo")
+	statusDir := b.statusDir // from newTestBackend; does not exist yet
+
+	// A uniquely named fake claude: runs the status hook for UserPromptSubmit.
+	fakeClaude := `#!/bin/sh
+while [ $# -gt 0 ]; do
+	[ "$1" = --settings ] && settings=$2
+	shift
+done
+[ -n "$settings" ] || exit 98
+printf '{"hook_event_name":"UserPromptSubmit"}' | sh "$(dirname "$settings")/hook-v` + fmt.Sprint(claudehooks.Version) + `.sh"
+exec sleep 30
+`
+	if err := os.WriteFile(filepath.Join(cbin, "claude"), []byte(fakeClaude), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	s := mustCreate(t, b, session.CreateOptions{Dir: t.TempDir(), Command: session.CommandClaude, RunAs: "bob"})
+	fi, err := os.Stat(statusDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o733 || fi.Mode()&os.ModeSticky == 0 {
+		t.Errorf("status dir mode = %v", fi.Mode())
+	}
+	for _, n := range []string{"hook-v2.sh", "settings-v2.json"} {
+		if _, err := os.Stat(filepath.Join(statusDir, n)); err != nil {
+			t.Error(err)
+		}
+	}
+	var got session.Session
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Log(tm(t, b, "capture-pane", "-p", "-t", s.ID))
+			t.Logf("%+v", got)
+			t.Log(tm(t, b, "display-message", "-p", "-t", s.ID, "#{pane_current_command} #{@harness_status_file}"))
+			fs, _ := os.ReadDir(statusDir)
+			for _, f := range fs {
+				d, _ := os.ReadFile(filepath.Join(statusDir, f.Name()))
+				t.Logf("%s: %.40q", f.Name(), d)
+			}
+		}
+	})
+	waitFor(t, func() bool {
+		list, err := b.List(context.Background())
+		if err != nil || len(list) != 1 {
+			return false
+		}
+		got = list[0]
+		return got.ClaudeStatus == session.ClaudeWorking && got.ClaudeStatusAt > 0
+	})
+	if got.RunAs != "bob" || got.ID != s.ID {
+		t.Errorf("session = %+v", got)
+	}
+	file := tm(t, b, "display-message", "-p", "-t", s.ID, "#{@harness_status_file}")
+	if !validStatusFile(statusDir, file) {
+		t.Fatalf("status file option = %q", file)
+	}
+	if _, err := os.Stat(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Kill(context.Background(), s.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Errorf("status file still exists: %v", err)
+	}
+}
+
+// The target user owns their status file and could replace it with something
+// that never ends; reading must skip non-regular files instead of hanging.
+func TestReadStatusFilesSkipsSpecialFiles(t *testing.T) {
+	if _, err := exec.LookPath("mkfifo"); err != nil {
+		t.Skip("mkfifo not available")
+	}
+	b := newTestBackend(t)
+	dir := b.statusDir
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fifo := filepath.Join(dir, strings.Repeat("a", 32))
+	zero := filepath.Join(dir, strings.Repeat("b", 32))
+	good := filepath.Join(dir, strings.Repeat("c", 32))
+	if out, err := exec.Command("mkfifo", fifo).CombinedOutput(); err != nil {
+		t.Fatalf("mkfifo: %v %s", err, out)
+	}
+	if err := os.Symlink("/dev/zero", zero); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(good, []byte("working 1794420400\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	got, err := b.readStatusFiles(ctx, dir, []string{fifo, zero, good})
+	if err != nil {
+		t.Fatalf("readStatusFiles: %v", err)
+	}
+	if got[good] != "working 1794420400" || got[fifo] != "" || got[zero] != "" {
+		t.Errorf("got %q", got)
 	}
 }
