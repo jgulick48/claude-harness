@@ -108,9 +108,8 @@ Session: {"id":"$3","name":"h-api-1","harnessName":"","managed":true,"cwd":"/hom
           "windows":1,"attached":0,"created":1794420293,
           "claudeStatus":"waiting","claudeStatusAt":1794420400,"runAs":"bob"}
          runAs: the user the session switched to; omitted when not set.
-         Claude status hooks run as that user and can't reach the login user's tmux
-         server, so a run-as session's claudeStatus is only "unknown" (active pane
-         command is `claude`) or "".
+         A run-as session reports Claude status through a status file, not the tmux
+         options (§5.2).
          claudeStatus: "working" | "waiting" | "idle" | "unknown" | "" (Claude not running);
          see §5.2
 ```
@@ -127,7 +126,7 @@ Session: {"id":"$3","name":"h-api-1","harnessName":"","managed":true,"cwd":"/hom
 | `hosts.check` | `host` | `HostReport` (§5.3). A read-only setup check of the host. It changes nothing there. |
 | `hosts.trustKey` | `host`, `fingerprint` | `null`. Adds the pending host key to `~/.ssh/known_hosts` and reconnects. `fingerprint` must match `hostKey.fingerprint`; this guards against a key changing between the prompt and the click. |
 | `sessions.list` | `host` | `[Session]` |
-| `sessions.create` | `host`, `dir` (optional, `~` allowed, default home), `name` (optional), `command` (`"shell"` default or `"claude"`), `runAs` (optional Unix user name; the session's shell runs `sudo -iu <user>` then cds to `dir` (interpreted as that user, `~` is their home) and, for `command: "claude"`, starts Claude; sudo asks for a password in the terminal if it needs one. Invalid names are `bad_request`.) | `Session` |
+| `sessions.create` | `host`, `dir` (optional, `~` allowed, default home), `name` (optional), `command` (`"shell"` default or `"claude"`), `runAs` (optional Unix user name; the session's shell runs `sudo -iu <user>` then cds to `dir` (interpreted as that user, `~` is their home) and, for `command: "claude"`, starts Claude with the status hooks attached (§5.2); sudo asks for a password in the terminal if it needs one. Invalid names are `bad_request`.) | `Session` |
 | `sessions.kill` | `host`, `session` | `null` |
 | `sessions.rename` | `host`, `session`, `name` (`""` clears it) | `null`. Sets the display name only. |
 
@@ -174,6 +173,35 @@ up within one poll (≤ 2 s) in `sessions.changed`.
 | `""` | Claude isn't running | `SessionEnd` clears the options. Core also reports `""` whenever the active pane's command is a shell (`sh`, `bash`, `zsh`, `fish`, `dash`, `ksh`, `tcsh`), in case Claude exited without `SessionEnd`. |
 
 The hooks never affect Claude: the script always exits 0 and prints nothing.
+
+**Run-as sessions.** Claude runs as another user via `sudo -i`, so `$TMUX` is
+unset and it can't reach the login user's tmux server, and that user may not
+have the hooks installed. Instead:
+
+- Core keeps a status directory on the host, owned by the login user, mode
+  `1733` (sticky; others can create files but not list or delete them):
+  `/tmp/claude-harness-status-<login uid>` (override: `HARNESS_STATUS_DIR`).
+  Before the first run-as session (and again if its files go missing) core
+  verifies the directory is a real directory it owns and writes
+  `hook-v<N>.sh` (the hook script) and `settings-v<N>.json` (only our hook
+  entries) into it. If this fails the session is still created, just without
+  status.
+- Each run-as session gets a random status file `<dir>/<32 hex>`, stored in the
+  tmux session option `@harness_status_file`. Core types
+  `sudo -iu <user> -- env HARNESS_STATUS_FILE=<file> sh -c '…claude --settings <dir>/settings-v<N>.json…'`.
+  Claude merges `--settings` with the user's own settings.
+- With `HARNESS_STATUS_FILE` set, the v2 hook script writes `<state> <unix
+  seconds>` to that file (atomically; `SessionEnd` empties it) instead of
+  touching tmux.
+- Core reads the status files of all run-as sessions in one command per
+  `sessions.list` poll and uses the file's state and time in place of the tmux
+  options. A reported state wins over the active-pane check (the pane's command
+  is `sudo`, or the wrapper shell where sudo doesn't use its own pty); an empty file falls back to `unknown`/`""` as above.
+  Core removes the file when the session is killed.
+
+So status works for `command: "claude"` run-as sessions. A run-as `shell`
+session also has `HARNESS_STATUS_FILE` set, so it reports status only if Claude
+is started there with our (v2) hooks configured.
 
 ### 5.3 Host setup check
 

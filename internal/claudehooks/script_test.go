@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -173,4 +174,79 @@ func TestScriptBehaviour(t *testing.T) {
 			t.Errorf("status changed to %q", got)
 		}
 	})
+}
+
+func TestScriptFileMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
+	work := t.TempDir()
+	scriptPath := filepath.Join(work, "status.sh")
+	if err := os.WriteFile(scriptPath, Script(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(work, "st")
+	run := func(t *testing.T, json string) {
+		t.Helper()
+		cmd := exec.Command("sh", scriptPath)
+		cmd.Env = cleanEnv(work, "HARNESS_STATUS_FILE="+file)
+		cmd.Stdin = strings.NewReader(json)
+		var out bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, &out
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("exit: %v", err)
+		}
+		if out.Len() != 0 {
+			t.Fatalf("printed %q", out.String())
+		}
+	}
+	ev := func(name string) string { return `{"hook_event_name":"` + name + `"}` }
+	notif := func(typ string) string {
+		return `{"hook_event_name":"Notification","notification_type":"` + typ + `"}`
+	}
+	cases := []struct{ name, json, pre, want string }{
+		{"working", ev("UserPromptSubmit"), "", "working"},
+		{"waiting", ev("PermissionRequest"), "working 1", "waiting"},
+		{"notif waiting", notif("permission_prompt"), "working 1", "waiting"},
+		{"idle", ev("Stop"), "working 1", "idle"},
+		{"SessionEnd truncates", ev("SessionEnd"), "working 1", ""},
+		{"notif other unchanged", notif("idle_prompt"), "working 1", "working"},
+		{"unknown event unchanged", ev("Whatever"), "idle 1", "idle"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			os.Remove(file)
+			if c.pre != "" {
+				if err := os.WriteFile(file, []byte(c.pre+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			run(t, c.json)
+			data, err := os.ReadFile(file)
+			if c.pre == "" && c.want == "" {
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := strings.Fields(string(data))
+			if c.want == "" {
+				if len(f) != 0 {
+					t.Errorf("file = %q, want empty", data)
+				}
+				return
+			}
+			if len(f) != 2 || f[0] != c.want {
+				t.Fatalf("file = %q, want state %q", data, c.want)
+			}
+			if c.pre == "" || c.want != strings.Fields(c.pre)[0] {
+				if at, err := strconv.ParseInt(f[1], 10, 64); err != nil || at < time.Now().Unix()-60 {
+					t.Errorf("bad epoch in %q", data)
+				}
+				if fi, _ := os.Stat(file); fi.Mode().Perm() != 0o644 {
+					t.Errorf("mode = %v", fi.Mode().Perm())
+				}
+			}
+		})
+	}
 }

@@ -30,7 +30,10 @@ type Options struct {
 	Home   string // default os.UserHomeDir()
 	// Sudo is the sudo command run-as sessions type (default "sudo" on the
 	// session shell's PATH). Tests point it at a fake.
-	Sudo         string
+	Sudo string
+	// StatusDir is the directory run-as sessions' Claude status files live in
+	// (default /tmp/claude-harness-status-<login uid>). Tests override it.
+	StatusDir    string
 	PollInterval time.Duration
 	Logger       *slog.Logger
 }
@@ -50,6 +53,12 @@ type Backend struct {
 	ops      hostOps
 	poll     time.Duration
 	log      *slog.Logger
+
+	// Run-as Claude status (see runas_status.go).
+	statusDir   string
+	statusMu    sync.Mutex
+	statusReady string // set once the status dir is prepared
+	statusBase  string // resolved status dir (override or by uid)
 
 	hostMu    sync.Mutex
 	hostCache session.Host
@@ -149,7 +158,7 @@ func newBackend(id, name string, run tmux.Runner, opts Options) *Backend {
 	}
 	return &Backend{
 		id: id, name: name, run: run, kind: session.KindLocal, ops: localOps{home: opts.Home},
-		home: opts.Home, sudo: opts.Sudo, poll: opts.PollInterval, log: opts.Logger,
+		home: opts.Home, sudo: opts.Sudo, statusDir: opts.StatusDir, poll: opts.PollInterval, log: opts.Logger,
 		subs:   map[int]func([]session.Session){},
 		kickCh: make(chan struct{}, 1),
 		terms:  map[*terminal]struct{}{},
@@ -250,6 +259,7 @@ var listFormat = strings.Join([]string{
 	"#{session_id}", "#{session_name}", "#{@harness_name}", "#{@harness_managed}",
 	"#{pane_current_path}", "#{session_windows}", "#{session_attached}", "#{session_created}",
 	"#{@claude_status}", "#{@claude_status_at}", "#{pane_current_command}", "#{@harness_run_as}",
+	"#{@harness_status_file}",
 }, fieldSep)
 
 // shellCommands are pane commands that mean "no Claude here".
@@ -286,6 +296,7 @@ func (b *Backend) List(ctx context.Context) ([]session.Session, error) {
 		return nil, b.mapError(err, "")
 	}
 	list := []session.Session{}
+	var statusFiles, panes []string // parallel to list
 	for _, line := range strings.Split(string(out), "\n") {
 		if line == "" {
 			continue
@@ -313,10 +324,61 @@ func (b *Backend) List(ctx context.Context) ([]session.Session, error) {
 		if len(f) >= 12 {
 			sess.RunAs = f[11]
 		}
+		sf := ""
+		if len(f) >= 13 {
+			sf = f[12]
+		}
 		list = append(list, sess)
+		statusFiles = append(statusFiles, sf)
+		panes = append(panes, "")
+		if len(f) >= 11 {
+			panes[len(panes)-1] = f[10]
+		}
 	}
+	b.applyFileStatus(ctx, list, statusFiles, panes)
 	sort.SliceStable(list, func(i, j int) bool { return list[i].Created < list[j].Created })
 	return list, nil
+}
+
+// applyFileStatus overrides the Claude status of run-as sessions that have a
+// status file, reading all files in one host exec. Failures leave the
+// tmux-derived status alone.
+func (b *Backend) applyFileStatus(ctx context.Context, list []session.Session, files, panes []string) {
+	var paths []string
+	for i, p := range files {
+		if p != "" && list[i].RunAs != "" {
+			paths = append(paths, p)
+		}
+	}
+	if len(paths) == 0 {
+		return
+	}
+	dir, err := b.resolveStatusDir(ctx)
+	if err != nil {
+		b.log.Warn("resolving status dir failed", "err", err)
+		return
+	}
+	got, err := b.readStatusFiles(ctx, dir, paths)
+	if err != nil {
+		b.log.Warn("reading run-as status files failed", "err", err)
+		return
+	}
+	for i, p := range files {
+		content, ok := got[p]
+		if !ok {
+			continue
+		}
+		state, at, _ := parseStatusFile(content)
+		// A reported state is authoritative: the pane command of a run-as
+		// session is the wrapper shell, not claude, so it can't veto it.
+		// Without one (empty file after SessionEnd) fall back as usual.
+		switch state {
+		case session.ClaudeWorking, session.ClaudeWaiting, session.ClaudeIdle:
+			list[i].ClaudeStatus, list[i].ClaudeStatusAt = state, at
+		default:
+			list[i].ClaudeStatus, list[i].ClaudeStatusAt = deriveClaudeStatus("", panes[i]), 0
+		}
+	}
 }
 
 // expandDir expands "~" against the host's home. Host paths are always POSIX
@@ -394,8 +456,16 @@ func (b *Backend) Create(ctx context.Context, opts session.CreateOptions) (sessi
 		{"set-option", "-t", id, "@harness_managed", "1"},
 		{"set-option", "-t", id, "window-size", "latest"},
 	}
+	var statusFile, settingsFile string
 	if opts.RunAs != "" {
 		steps = append(steps, []string{"set-option", "-t", id, "@harness_run_as", opts.RunAs})
+		// Best effort: without the status dir the session just has no status.
+		if dir, err := b.statusSetup(ctx); err != nil {
+			b.log.Warn("run-as Claude status unavailable", "err", err)
+		} else {
+			statusFile, settingsFile = dir+"/"+newStatusToken(), statusSettingsPath(dir)
+			steps = append(steps, []string{"set-option", "-t", id, "@harness_status_file", statusFile})
+		}
 	}
 	if opts.Name != "" {
 		steps = append(steps, []string{"set-option", "-t", id, "@harness_name", opts.Name})
@@ -410,7 +480,7 @@ func (b *Backend) Create(ctx context.Context, opts session.CreateOptions) (sessi
 	// tmux may report the server's cwd instead of the pane's.
 	b.waitShellReady(ctx, id)
 	if opts.RunAs != "" {
-		line := runAsCommand(b.sudo, opts.RunAs, opts.Dir, opts.Command)
+		line := runAsCommand(b.sudo, opts.RunAs, opts.Dir, opts.Command, statusFile, settingsFile)
 		if _, err := b.run.Output(ctx, "send-keys", "-t", id, "-l", line); err != nil {
 			return fail(err)
 		}
@@ -446,8 +516,11 @@ var userNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9._-]{0,31}$`)
 // <user> running a small script that cds to dir (interpreted as that user),
 // optionally starts claude, then leaves the user in their login shell. Not
 // exec'd, so a failing sudo leaves the login user's shell to retry in. sudo
-// "" means plain "sudo" from the shell's PATH.
-func runAsCommand(sudo, user, dir, command string) string {
+// "" means plain "sudo" from the shell's PATH. With a statusFile the command
+// runs under env HARNESS_STATUS_FILE=<file> so the hook script can report
+// status, and claude is started with --settings <settingsPath>; both "" gives
+// the plain line.
+func runAsCommand(sudo, user, dir, command, statusFile, settingsPath string) string {
 	inner := ""
 	notFound := func(d string) string {
 		return tmux.ShellQuote("harness: directory not found: " + d)
@@ -460,14 +533,22 @@ func runAsCommand(sudo, user, dir, command string) string {
 		inner += "cd " + tmux.ShellQuote(dir) + " || echo " + notFound(dir) + " >&2; "
 	}
 	if command == session.CommandClaude {
-		inner += "claude; "
+		inner += "claude"
+		if statusFile != "" && settingsPath != "" {
+			inner += " --settings " + tmux.ShellQuote(settingsPath)
+		}
+		inner += "; "
 	}
 	inner += `exec "$SHELL" -l`
 	bin := "sudo"
 	if sudo != "" {
 		bin = tmux.ShellQuote(sudo)
 	}
-	return bin + " -iu " + tmux.ShellQuote(user) + " -- sh -c " + tmux.ShellQuote(inner)
+	env := ""
+	if statusFile != "" {
+		env = " env HARNESS_STATUS_FILE=" + tmux.ShellQuote(statusFile)
+	}
+	return bin + " -iu " + tmux.ShellQuote(user) + " --" + env + " sh -c " + tmux.ShellQuote(inner)
 }
 
 // shellReadyTimeout bounds waitShellReady; a shell with an empty prompt just
@@ -499,9 +580,14 @@ func (b *Backend) Kill(ctx context.Context, id string) error {
 	if err := b.gate(); err != nil {
 		return err
 	}
+	statusFile := ""
+	if out, err := b.run.Output(ctx, "display-message", "-p", "-t", id, "#{@harness_status_file}"); err == nil {
+		statusFile = strings.TrimSpace(string(out))
+	}
 	if _, err := b.run.Output(ctx, "kill-session", "-t", id); err != nil {
 		return b.mapError(err, id)
 	}
+	b.removeStatusFile(ctx, statusFile)
 	b.kick()
 	return nil
 }

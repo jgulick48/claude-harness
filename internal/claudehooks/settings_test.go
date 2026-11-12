@@ -36,7 +36,7 @@ func ourGroups(t *testing.T, b []byte, ev, path string) int {
 
 func TestScriptHeader(t *testing.T) {
 	s := string(Script())
-	if !strings.HasPrefix(s, "#!/bin/sh\n# claude-harness-status v1\n") {
+	if !strings.HasPrefix(s, "#!/bin/sh\n# claude-harness-status v2\n") {
 		t.Fatalf("bad header: %q", s[:50])
 	}
 }
