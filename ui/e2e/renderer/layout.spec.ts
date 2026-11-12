@@ -56,7 +56,8 @@ test('split panes: two sessions, isolation, no duplicates, resize, restore, clos
   await page.keyboard.press(keys.splitRight)
   await expect(panes(page)).toHaveCount(2)
   await expect(page.getByTestId('empty-pane')).toBeVisible()
-  await expect(page.getByTestId('empty-pane')).toContainText('Ctrl+Shift+D')
+  // The hint shows this platform's binding (⌘D on macOS).
+  await expect(page.getByTestId('empty-pane')).toContainText(process.platform === 'darwin' ? '⌘D' : 'Ctrl+Shift+D')
   await expect(pane(page, 1)).toHaveAttribute('data-focused', 'true')
 
   await row(page, 'right-two').click()

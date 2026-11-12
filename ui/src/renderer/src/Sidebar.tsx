@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { claimFocus } from './focusClaims'
 import { useCore } from './CoreContext'
 import { UpdateBanner } from './UpdateBanner'
 import { HooksDialog, type HooksMode } from './HooksDialog'
@@ -467,6 +468,9 @@ export function Sidebar(): React.JSX.Element {
       if (sc.kind === 'rail') {
         latest.current.toggleRail()
       } else if (filterRef.current) {
+        // The filter may already be focused (no focusin): claim focus
+        // explicitly so a terminal whose attach is still in flight won't take it.
+        claimFocus()
         filterRef.current.focus()
         filterRef.current.select()
       } else {

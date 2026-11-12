@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { focusGeneration } from './focusClaims'
 import { clipboardAction } from './terminalKeys'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -163,6 +164,7 @@ export function TerminalPane({ paneId, focused, host, sessionId, session, hostNa
       }
     })
 
+    const attachFocusGen = focusGeneration()
     client
       .request<{ stream: number }>('term.attach', { host, session: sessionId, cols: term.cols, rows: term.rows })
       .then((r) => {
@@ -173,7 +175,10 @@ export function TerminalPane({ paneId, focused, host, sessionId, session, hostNa
         }
         stream = r.stream
         offStream = client.onStream(r.stream, (d) => term.write(d))
-        term.focus()
+        // Only take focus if nothing else claimed it while the attach was in
+        // flight (see focusClaims.ts); otherwise e.g. typing in the filter
+        // right after pressing Enter would be cut off mid-word.
+        if (focusGeneration() === attachFocusGen || box.contains(document.activeElement)) term.focus()
       })
       .catch((e: Error) => {
         if (disposed) return

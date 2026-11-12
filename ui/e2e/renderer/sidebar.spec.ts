@@ -101,6 +101,24 @@ test('Ctrl+2 attaches the second session; arrows and Enter navigate rows', async
   await expect(rows(page).nth(2)).toHaveAttribute('aria-current', 'true')
 })
 
+// Regression: a terminal focused itself when its (async) attach finished,
+// even if the user had moved on - typing in the filter right after Enter got
+// cut off mid-word (seen on macOS CI, where attaches are a bit slower).
+test('a finishing attach does not steal focus from the filter', async ({ page }) => {
+  await focusTerminal(page)
+  await page.keyboard.press(keys.filter)
+  await page.keyboard.type('gamma')
+  await page.keyboard.press('Enter') // attach starts; don't wait for it
+  await page.keyboard.press(keys.filter)
+  await page.keyboard.type('alp')
+  // The gamma row is filtered out by now, so check the attached pane's header.
+  await expect(page.locator('.pane-leaf').first()).toContainText('gamma-docs')
+  await page.waitForTimeout(1500) // let the attach finish and any focus move happen
+  await expect(filter(page)).toBeFocused()
+  await expect(filter(page)).toHaveValue('alp')
+  await page.keyboard.press('Escape')
+})
+
 test('context menu offers open in split', async ({ page }) => {
   await rows(page).first().click({ button: 'right' })
   await expect(page.getByRole('menuitem', { name: 'Open in split right' })).toBeVisible()
