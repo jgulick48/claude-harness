@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('harness', {
   // The sandboxed preload can't use Electron's clipboard directly; main does.
   readClipboard: (): Promise<string> => ipcRenderer.invoke('clipboard:read'),
   writeClipboard: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:write', text),
+  // Syncs Electron's nativeTheme (window frame, menus, scrollbars) with the app theme.
+  setThemeSource: (source: 'system' | 'light' | 'dark'): void => ipcRenderer.send('theme:source', source),
   showTerminalMenu: (hasSelection: boolean): Promise<'copy' | 'paste' | null> =>
     ipcRenderer.invoke('terminal:menu', hasSelection)
 })

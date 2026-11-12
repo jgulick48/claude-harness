@@ -11,7 +11,9 @@ import {
 } from './claudeStatus'
 import { loadFlag, NOTIFICATIONS_KEY } from './prefs'
 import { displayPath, sessionLabel, shouldRetryOnResume, type Host, type Session } from './sessions'
-import { initialState, reducer, type Action, type AppState } from './store'
+import { visibleRefs } from './layout'
+import { loadLayout, saveLayout } from './layoutStorage'
+import { initialStateWith, reducer, type Action, type AppState } from './store'
 
 interface Ctx {
   state: AppState
@@ -32,7 +34,7 @@ export function useCore(): Ctx {
 }
 
 export function CoreProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
-  const [state, dispatch] = useReducer(reducer, initialState)
+  const [state, dispatch] = useReducer(reducer, undefined, () => initialStateWith(loadLayout()))
   const [clientState, setClientState] = useState<ClientState>({ state: 'connecting' })
   const [client, setClient] = useState<CoreClient | null>(null)
   const [mainErr, setMainErr] = useState<string | null>(null)
@@ -51,7 +53,7 @@ export function CoreProvider({ children }: { children: React.ReactNode }): React
     const notifyWaiting = (hostId: string, s: Session): void => {
       if (!loadFlag(NOTIFICATIONS_KEY, true)) return
       const st = stateRef.current
-      if (isViewing(st.active, hostId, s.id, document.hasFocus())) return
+      if (visibleRefs(st).some((r) => isViewing(r, hostId, s.id, document.hasFocus()))) return
       if (!allow(`${hostId}/${s.id}`, Date.now())) return
       const host = st.hosts.find((h) => h.id === hostId)
       const { title, body } = notificationText(
@@ -119,6 +121,19 @@ export function CoreProvider({ children }: { children: React.ReactNode }): React
   }, [])
 
   const connected = clientState.state === 'ready'
+
+  // Auto-save the layout (debounced; flushed when the page goes away).
+  const layoutRef = useRef(state.layout)
+  layoutRef.current = state.layout
+  useEffect(() => {
+    const t = setTimeout(() => saveLayout(state.layout), 300)
+    return () => clearTimeout(t)
+  }, [state.layout])
+  useEffect(() => {
+    const flush = (): void => saveLayout(layoutRef.current)
+    window.addEventListener('pagehide', flush)
+    return () => window.removeEventListener('pagehide', flush)
+  }, [])
 
   // Waiting count in the window title and the dock/launcher badge.
   const waiting = attentionCount(state.sessions)

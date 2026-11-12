@@ -125,6 +125,40 @@ test('paste from the system clipboard reaches the terminal', async () => {
   await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(pasted(0))
 })
 
+// Regression: Electron's default View menu binds Ctrl/Cmd+= / - / 0 to page
+// zoom, and menu accelerators fire before the renderer sees the key - so the
+// terminal font zoom never happened and the whole UI zoomed instead.
+test('Ctrl/Cmd+= zooms the terminal font, not the whole page', async () => {
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
+  const row = page.locator('.xterm-rows > div').first()
+  await page.locator('.xterm').first().click()
+  const before = (await row.boundingBox())?.height ?? 0
+  expect(before).toBeGreaterThan(0)
+  await page.keyboard.press(`${mod}+Equal`)
+  await page.keyboard.press(`${mod}+Equal`)
+  await expect.poll(async () => (await row.boundingBox())?.height ?? 0).toBeGreaterThan(before)
+  const zoom = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getZoomFactor())
+  expect(zoom).toBe(1)
+  await page.keyboard.press(`${mod}+Digit0`)
+  await expect.poll(async () => (await row.boundingBox())?.height ?? 0).toBe(before)
+})
+
+// Plain Ctrl+W is readline's delete-word on Windows/Linux and must reach the
+// shell - not trigger the default Window menu's "Close" (CmdOrCtrl+W).
+test('Ctrl+W deletes a word in the shell and leaves the window open (Windows/Linux)', async () => {
+  test.skip(process.platform === 'darwin', 'Cmd+W is the pane-close shortcut on macOS')
+  const rows = page.locator('.xterm-rows')
+  await page.locator('.xterm').first().click()
+  // A plain word: the tty's word-erase treats '-' as a word boundary.
+  await page.keyboard.type('echo keep-me dropword')
+  await page.keyboard.press('Control+W')
+  await page.keyboard.press('Enter')
+  await expect(rows).toContainText('keep-me')
+  await expect(rows.getByText('keep-me', { exact: true })).toHaveCount(1)
+  expect(app.windows().length).toBe(1)
+  expect(await page.isClosed()).toBe(false)
+})
+
 test('Check for Updates… reports that updates are unavailable in an unpackaged build', async () => {
   const labels = await app.evaluate(({ Menu }) => {
     const found: string[] = []

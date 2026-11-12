@@ -38,6 +38,8 @@ export interface HarnessApi {
   /** Plain text from the system clipboard. */
   readClipboard(): Promise<string>
   writeClipboard(text: string): Promise<void>
+  /** Sets Electron's nativeTheme.themeSource so the frame, menus and scrollbars match the app theme. */
+  setThemeSource(source: 'system' | 'light' | 'dark'): void
   /** Shows the terminal's right-click menu; resolves to the chosen item. */
   showTerminalMenu(hasSelection: boolean): Promise<'copy' | 'paste' | null>
 }

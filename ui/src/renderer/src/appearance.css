@@ -1,0 +1,33 @@
+/* Appearance dialog (M6). */
+.appearance-dialog { width: min(460px, 92vw); }
+.appearance-field { display: flex; flex-direction: column; gap: 4px; }
+.appearance-label { font-size: 12px; color: var(--fg-muted); }
+.appearance-segments { display: flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; width: fit-content; }
+.appearance-segment {
+  font: inherit;
+  padding: 5px 16px;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--border);
+}
+.appearance-segment:last-child { border-right: 0; }
+.appearance-segment[aria-pressed='true'] { background: var(--accent); color: #fff; }
+.appearance-segment:focus-visible, .appearance-dialog .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.appearance-row { display: flex; gap: 8px; align-items: center; }
+.appearance-row input[type='text'], .appearance-row input[type='range'] { flex: 1; min-width: 0; }
+.appearance-dialog .appearance-number { width: 64px; flex: none; }
+.appearance-swatch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--term-bg);
+  color: var(--term-fg);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+.appearance-swatch-text { margin-right: auto; }
+.appearance-swatch i { display: inline-block; width: 14px; height: 14px; border-radius: 3px; }

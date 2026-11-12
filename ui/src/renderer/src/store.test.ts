@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { Host, Session } from './sessions'
-import { initialState, reducer } from './store'
+import { initialState, initialStateWith, reducer } from './store'
+import { visibleRefs } from './layout'
+import { leaves } from './layoutTree'
+import { parseLayout } from './layoutStorage'
 
 const s = (id: string, name = 'n'): Session => ({
   id, name, harnessName: '', managed: true, cwd: '/x', windows: 1, attached: 0, created: 1
@@ -99,5 +102,38 @@ describe('store reducer', () => {
       st = reducer(st, { type: 'hosts', hosts: [] })
       expect(st.sessions).toEqual({})
     })
+  })
+})
+
+describe('split layout in the reducer', () => {
+  const ref = (n: number) => ({ host: 'local', session: `$${n}` })
+  it('derives active from the focused pane', () => {
+    let st = reducer(initialState, { type: 'attach', ref: ref(1) })
+    st = reducer(st, { type: 'openInSplit', ref: ref(2), direction: 'right' })
+    expect(st.active).toEqual(ref(2))
+    expect(visibleRefs(st)).toEqual([ref(2), ref(1)])
+    st = reducer(st, { type: 'attach', ref: ref(1) }) // focuses pane 1, no duplicate
+    expect(st.active).toEqual(ref(1))
+    expect(visibleRefs(st)).toEqual([ref(1), ref(2)])
+    st = reducer(st, { type: 'closePane' })
+    expect(st.active).toEqual(ref(2))
+  })
+  it('notices past the pane cap', () => {
+    let st = initialState
+    for (let i = 0; i < 6; i++) st = reducer(st, { type: 'split', direction: 'right' })
+    expect(st.notice).toMatch(/At most 6/)
+    expect(reducer(st, { type: 'dismissNotice' }).notice).toBeNull()
+  })
+  it('removing a host removes its panes and reconcile resolves restored refs', () => {
+    const host = (id: string): Host => ({ id, name: id, kind: 'ssh', state: 'connected' }) as Host
+    let st = initialStateWith(
+      parseLayout({ root: { kind: 'split', dir: 'row', sizes: [1, 1], children: [{ kind: 'pane', ref: ref(1) }, { kind: 'pane', ref: { host: 'x', session: '$1' } }] }, focus: 0 })
+    )
+    st = reducer(st, { type: 'hosts', hosts: [host('local')] }) // x is gone
+    expect(visibleRefs(st)).toEqual([ref(1)])
+    expect(leaves(st.layout.root)[0].pending).toBe(true)
+    st = reducer(st, { type: 'sessions', host: 'local', sessions: [] })
+    expect(leaves(st.layout.root)[0]).toMatchObject({ ref: null, gone: true })
+    expect(st.active).toBeNull()
   })
 })

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, ipcMain, Menu, powerMonitor, shell, type MenuItemConstructorOptions } from 'electron'
+import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeTheme, powerMonitor, shell, type MenuItemConstructorOptions } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -93,9 +93,27 @@ function buildMenu(): void {
           } as MenuItemConstructorOptions
         ]
       : []),
-    { role: 'fileMenu' },
+    // On macOS, menu accelerators fire before the page sees the key, so the
+    // default File and View menus would steal the app's own shortcuts: Cmd+W
+    // (close pane) and Cmd+= / Cmd+- / Cmd+0 (terminal font zoom). Use menus
+    // without those accelerators there. On Windows/Linux the page gets the key
+    // first and the app's handlers preventDefault, so the defaults are fine
+    // (e2e: "Ctrl/Cmd+= zooms the terminal font", "Ctrl+W deletes a word").
+    isMac
+      ? { label: 'File', submenu: [{ role: 'close', accelerator: 'Cmd+Shift+W' }] }
+      : { role: 'fileMenu' },
     { role: 'editMenu' },
-    { role: 'viewMenu' },
+    isMac
+      ? {
+          label: 'View',
+          submenu: [
+            ...(app.isPackaged
+              ? []
+              : ([{ role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' }] as MenuItemConstructorOptions[])),
+            { role: 'togglefullscreen' }
+          ]
+        }
+      : { role: 'viewMenu' },
     { role: 'windowMenu' },
     { role: 'help', submenu: isMac ? [] : [checkItem] }
   ]
@@ -167,6 +185,10 @@ async function launchCore(): Promise<void> {
 ipcMain.on('attention:count', (_e, n: unknown) => {
   const count = typeof n === 'number' && Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0
   app.setBadgeCount(count)
+})
+
+ipcMain.on('theme:source', (_e, source: unknown) => {
+  if (source === 'system' || source === 'light' || source === 'dark') nativeTheme.themeSource = source
 })
 
 ipcMain.on('window:focus', () => {

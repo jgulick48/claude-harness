@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
+import { focusGeneration } from './focusClaims'
 import { clipboardAction } from './terminalKeys'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { useCore } from './CoreContext'
+import { useTerminalAppearance } from './appearance'
+import { layoutCommand } from './shortcuts'
 import { StatusBadge } from './StatusBadge'
 import { autoReattachAction, closedMessage, sessionLabel, type Session } from './sessions'
 
@@ -25,6 +28,8 @@ function readTheme(): ITheme {
 const FONT = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace'
 
 interface Props {
+  paneId: string
+  focused: boolean
   host: string
   sessionId: string
   session: Session | undefined
@@ -32,9 +37,15 @@ interface Props {
   hostConnected: boolean
 }
 
-export function TerminalPane({ host, sessionId, session, hostName, hostConnected }: Props): React.JSX.Element {
+export function TerminalPane({ paneId, focused, host, sessionId, session, hostName, hostConnected }: Props): React.JSX.Element {
   const { client, dispatch } = useCore()
   const boxRef = useRef<HTMLDivElement>(null)
+  const termRef = useRef<Terminal | null>(null)
+  // Refits and tells the core; set by the attach effect, used on appearance changes.
+  const refitRef = useRef<(() => void) | null>(null)
+  const appearance = useTerminalAppearance()
+  const appearanceRef = useRef(appearance)
+  appearanceRef.current = appearance
   const [ended, setEnded] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   // Bumped by Reattach to re-run the attach effect for the same session.
@@ -70,13 +81,15 @@ export function TerminalPane({ host, sessionId, session, hostName, hostConnected
     const wasAuto = autoRef.current
     autoRef.current = false
 
+    const ap = appearanceRef.current
     const term = new Terminal({
-      fontFamily: FONT,
-      fontSize: 13,
+      fontFamily: ap.fontFamily ?? FONT,
+      fontSize: ap.fontSize,
       cursorBlink: true,
       scrollback: 5000,
-      theme: readTheme()
+      theme: ap.theme ?? readTheme()
     })
+    termRef.current = term
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.loadAddon(new WebLinksAddon((_e, uri) => window.open(uri)))
@@ -97,6 +110,8 @@ export function TerminalPane({ host, sessionId, session, hostName, hostConnected
       term.clearSelection()
     }
     term.attachCustomKeyEventHandler((e) => {
+      // Layout shortcuts are handled on the window; keep them out of the terminal.
+      if (layoutCommand(e, isMac)) return false
       const action = clipboardAction(e, isMac, term.hasSelection())
       if (!action) return true
       e.preventDefault()
@@ -122,6 +137,14 @@ export function TerminalPane({ host, sessionId, session, hostName, hostConnected
       }
     }
     doFit()
+    const refit = (): void => {
+      const { cols, rows } = term
+      doFit()
+      if (stream !== null && (term.cols !== cols || term.rows !== rows)) {
+        client.request('term.resize', { stream, cols: term.cols, rows: term.rows }).catch(() => {})
+      }
+    }
+    refitRef.current = refit
 
     term.onData((d) => {
       if (stream !== null) client.sendInput(stream, d)
@@ -141,6 +164,7 @@ export function TerminalPane({ host, sessionId, session, hostName, hostConnected
       }
     })
 
+    const attachFocusGen = focusGeneration()
     client
       .request<{ stream: number }>('term.attach', { host, session: sessionId, cols: term.cols, rows: term.rows })
       .then((r) => {
@@ -151,7 +175,10 @@ export function TerminalPane({ host, sessionId, session, hostName, hostConnected
         }
         stream = r.stream
         offStream = client.onStream(r.stream, (d) => term.write(d))
-        term.focus()
+        // Only take focus if nothing else claimed it while the attach was in
+        // flight (see focusClaims.ts); otherwise e.g. typing in the filter
+        // right after pressing Enter would be cut off mid-word.
+        if (focusGeneration() === attachFocusGen || box.contains(document.activeElement)) term.focus()
       })
       .catch((e: Error) => {
         if (disposed) return
@@ -180,18 +207,14 @@ export function TerminalPane({ host, sessionId, session, hostName, hostConnected
       if (debounce) clearTimeout(debounce)
       debounce = setTimeout(() => {
         if (disposed) return
-        const { cols, rows } = term
-        doFit()
-        if (stream !== null && (term.cols !== cols || term.rows !== rows)) {
-          client.request('term.resize', { stream, cols: term.cols, rows: term.rows }).catch(() => {})
-        }
+        refit()
       }, 100)
     })
     ro.observe(box)
 
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
     const onScheme = (): void => {
-      term.options.theme = readTheme()
+      if (!appearanceRef.current.theme) term.options.theme = readTheme()
     }
     mq.addEventListener('change', onScheme)
 
@@ -204,20 +227,47 @@ export function TerminalPane({ host, sessionId, session, hostName, hostConnected
       offClosed()
       offStream?.()
       if (stream !== null) client.request('term.detach', { stream }).catch(() => {})
+      refitRef.current = null
+      termRef.current = null
       term.dispose()
     }
   }, [client, host, sessionId, attempt])
 
+  // Appearance changes apply live to this terminal, then refit.
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+    term.options.theme = appearance.theme ?? readTheme()
+    term.options.fontSize = appearance.fontSize
+    term.options.fontFamily = appearance.fontFamily ?? FONT
+    refitRef.current?.()
+  }, [appearance])
+
+  // Keyboard focus follows the focused pane (also after a layout shortcut).
+  useEffect(() => {
+    if (focused) termRef.current?.focus()
+  }, [focused])
+
   return (
-    <div className="term-pane">
+    <div className="term-pane" data-testid="terminal-pane">
       <header className="term-header">
         <span className="term-titleline">
           <span className="term-title">{session ? sessionLabel(session) : sessionId}</span>
           {session && <StatusBadge session={session} />}
+          <span className="term-host">{hostName}</span>
+          <button
+            className="pane-close"
+            aria-label="Close pane"
+            title="Close pane"
+            onClick={() => dispatch({ type: 'closePane', id: paneId })}
+          >
+            ✕
+          </button>
         </span>
         {session && <span className="term-path">{session.cwd}</span>}
       </header>
-      <div className="term-body">
+      {/* A preset's background also fills the box padding, so no strip of the app color shows. */}
+      <div className="term-body" style={appearance.theme?.background ? { background: appearance.theme.background } : undefined}>
         <div className="term-box" ref={boxRef} />
         {(ended !== null || error !== null) && (
           <div className="term-overlay">
@@ -227,7 +277,7 @@ export function TerminalPane({ host, sessionId, session, hostName, hostConnected
                 Reattach
               </button>
             )}
-            <button className="btn" autoFocus onClick={() => dispatch({ type: 'attach', ref: null })}>
+            <button className="btn" autoFocus onClick={() => dispatch({ type: 'clearPane', id: paneId })}>
               Close
             </button>
           </div>

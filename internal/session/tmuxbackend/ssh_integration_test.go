@@ -342,12 +342,14 @@ drain:
 	if h := b.Host(ctx); h.State == session.HostConnected || h.Error != "connection lost" {
 		t.Errorf("%+v", h)
 	}
-	b.subsMu.Lock()
-	polling := b.stopPoll != nil
-	b.subsMu.Unlock()
-	if polling {
-		t.Error("still polling after connection loss")
-	}
+	// isLost turns true the moment the SSH client's Done channel closes;
+	// polling is stopped a moment later by the connection-loss goroutine, so
+	// wait for it rather than checking immediately (flaked on macOS CI).
+	waitFor(t, func() bool {
+		b.subsMu.Lock()
+		defer b.subsMu.Unlock()
+		return b.stopPoll == nil
+	})
 
 	// The tmux session lives on; a fresh connection and backend see it.
 	b2 := r.backend(r.dial(), Options{})

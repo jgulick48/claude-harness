@@ -79,3 +79,26 @@ export async function runInTerminal(page: Page, command: string, expected: strin
   await page.keyboard.press('Enter')
   await expect(page.locator('.xterm-rows')).toContainText(expected)
 }
+
+/**
+ * The app's own shortcuts for the platform the browser runs on. The renderer
+ * picks Cmd on macOS and Ctrl elsewhere (navigator.platform), and the
+ * Playwright browser runs on the same OS as the tests, so match that here.
+ * Bindings: src/renderer/src/shortcuts.ts (layout), sidebarNav.ts (sidebar),
+ * appearanceModel.ts (zoom).
+ */
+const isMac = process.platform === 'darwin'
+const mod = isMac ? 'Meta' : 'Control'
+export const keys = {
+  filter: `${mod}+k`,
+  rail: `${mod}+b`,
+  jump: (n: number): string => `${mod}+${n}`,
+  zoomIn: `${mod}+Equal`,
+  zoomOut: `${mod}+Minus`,
+  zoomReset: `${mod}+Digit0`,
+  splitRight: isMac ? 'Meta+d' : 'Control+Shift+D',
+  splitDown: isMac ? 'Meta+Shift+d' : 'Control+Shift+E',
+  closePane: isMac ? 'Meta+w' : 'Control+Shift+W',
+  focusLeft: `${mod}+Alt+ArrowLeft`,
+  focusRight: `${mod}+Alt+ArrowRight`
+}
