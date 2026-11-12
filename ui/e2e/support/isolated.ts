@@ -203,6 +203,7 @@ export async function prepareIsolation(opts: IsolatedOpts = {}): Promise<Isolati
   const dir = mkdtempSync(join(tmpdir(), 'harness-e2e-'))
   const home = join(dir, 'home')
   mkdirSync(home, { recursive: true })
+  writeShortPrompt(home)
   for (const d of opts.homeDirs ?? []) mkdirSync(join(home, d), { recursive: true })
   const tmuxSocket = `harness-e2e-${process.pid}-${randomBytes(4).toString('hex')}`
   // The test SSH host's tmux socket is <sshTmux>/tmux-<uid>/<socket>. Unix
@@ -237,6 +238,7 @@ export async function prepareIsolation(opts: IsolatedOpts = {}): Promise<Isolati
     if (opts.ssh) {
       const sshHome = join(dir, 'sshhome')
       mkdirSync(sshHome, { recursive: true })
+      writeShortPrompt(sshHome)
       ssh = await startSshtestd(sshHome, sshTmux)
     }
     const env = isolatedEnv(dir, home, tmuxSocket, ssh?.agentSocket ?? '')
@@ -259,6 +261,18 @@ function removeDir(p: string): void {
   } catch (e) {
     console.warn(`e2e cleanup: could not remove ${p}: ${(e as Error).message}`)
   }
+}
+
+/**
+ * Give the fixture shells a short, fixed prompt. The default prompt is the
+ * host name on macOS runners (~60 chars), which wraps in a narrow split pane;
+ * when the width changes, bash redraws a re-wrapped multi-row prompt over the
+ * line above (a bash/readline limitation, the same in any terminal), which made
+ * output-based assertions depend on the runner's host name. A login sh reads
+ * ~/.profile after the system profile, so this overrides it on Linux and macOS.
+ */
+function writeShortPrompt(home: string): void {
+  writeFileSync(join(home, '.profile'), "PS1='$ '\nexport PS1\n")
 }
 
 export async function startIsolatedCore(opts: IsolatedOpts = {}): Promise<IsolatedCore> {
