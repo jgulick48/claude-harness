@@ -118,6 +118,18 @@ describe('split layout in the reducer', () => {
     st = reducer(st, { type: 'closePane' })
     expect(st.active).toEqual(ref(2))
   })
+  it('disconnect closes the session panes but keeps the session listed', () => {
+    let st = reducer(initialState, { type: 'sessions', host: 'local', sessions: [s('$1'), s('$2')] })
+    st = reducer(st, { type: 'attach', ref: ref(1) })
+    st = reducer(st, { type: 'openInSplit', ref: ref(2), direction: 'right' })
+    st = reducer(st, { type: 'disconnect', ref: ref(2) })
+    expect(visibleRefs(st)).toEqual([ref(1)])
+    expect(st.active).toEqual(ref(1))
+    expect(st.sessions.local.map((x) => x.id)).toEqual(['$1', '$2'])
+    st = reducer(st, { type: 'disconnect', ref: ref(1) })
+    expect(visibleRefs(st)).toEqual([])
+    expect(st.active).toBeNull()
+  })
   it('notices past the pane cap', () => {
     let st = initialState
     for (let i = 0; i < 6; i++) st = reducer(st, { type: 'split', direction: 'right' })

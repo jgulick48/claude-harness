@@ -4,6 +4,7 @@ import {
   attachRef,
   clearPane,
   closePane,
+  closeRef,
   emptyLayout,
   focusedPane,
   focusDirection,
@@ -67,6 +68,8 @@ export type Action =
   /** New empty pane next to the focused one. */
   | { type: 'split'; direction: 'right' | 'down' }
   | { type: 'closePane'; id?: string }
+  /** Close every pane showing ref; the tmux session keeps running. */
+  | { type: 'disconnect'; ref: ActiveRef }
   /** Empty a pane (keeps the pane). */
   | { type: 'clearPane'; id: string }
   | { type: 'focusPane'; id: string }
@@ -110,6 +113,8 @@ export function reducer(state: AppState, a: Action): AppState {
     }
     case 'closePane':
       return withLayout(state, closePane(state.layout, a.id ?? state.layout.focus))
+    case 'disconnect':
+      return withLayout(state, closeRef(state.layout, a.ref))
     case 'clearPane':
       return withLayout(state, clearPane(state.layout, a.id))
     case 'focusPane':

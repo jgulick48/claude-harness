@@ -214,15 +214,20 @@ function SettingsMenu({
 
 function ContextMenu({
   menu,
+  open,
   onRename,
+  onDisconnect,
   onKill,
   onSplit,
   onChange,
   onClose
 }: {
   menu: MenuState
+  /** The session is shown in a pane, so it can be disconnected. */
+  open: boolean
   onSplit: (direction: 'right' | 'down') => void
   onRename: () => void
+  onDisconnect: () => void
   onKill: () => void
   onChange: (m: MenuState) => void
   onClose: () => void
@@ -252,6 +257,16 @@ function ContextMenu({
           <button className="ctx-item" role="menuitem" onClick={onRename}>
             Rename…
           </button>
+          {open && (
+            <button
+              className="ctx-item"
+              role="menuitem"
+              title="Close its panes; the tmux session keeps running"
+              onClick={onDisconnect}
+            >
+              Disconnect
+            </button>
+          )}
           <button
             className="ctx-item danger"
             role="menuitem"
@@ -949,6 +964,7 @@ export function Sidebar(): React.JSX.Element {
       {menu && (
         <ContextMenu
           menu={menu}
+          open={visible.has(`${menu.host.id}/${menu.session.id}`)}
           onChange={setMenu}
           onClose={() => setMenu(null)}
           onRename={() => {
@@ -959,6 +975,11 @@ export function Sidebar(): React.JSX.Element {
             const m = menu
             setMenu(null)
             dispatch({ type: 'openInSplit', ref: { host: m.host.id, session: m.session.id }, direction })
+          }}
+          onDisconnect={() => {
+            const m = menu
+            setMenu(null)
+            dispatch({ type: 'disconnect', ref: { host: m.host.id, session: m.session.id } })
           }}
           onKill={() => {
             const m = menu
