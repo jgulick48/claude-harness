@@ -148,6 +148,13 @@ export function closePane(l: Layout, id: string): Layout {
   return { ...l, root, focus }
 }
 
+/** Closes every pane showing ref (the tmux session itself is untouched). */
+export function closeRef(l: Layout, ref: ActiveRef): Layout {
+  let out = l
+  for (const p of leaves(l.root)) if (sameRef(p.ref, ref)) out = closePane(out, p.id)
+  return out
+}
+
 export interface Rect {
   x: number
   y: number

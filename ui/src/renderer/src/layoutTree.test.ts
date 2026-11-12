@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  attachRef, closePane, dividers, emptyLayout, focusDirection, layoutRefs, leaves, MAX_PANES, paneCount,
+  attachRef, closePane, closeRef, dividers, emptyLayout, focusDirection, layoutRefs, leaves, MAX_PANES, paneCount,
   pruneHosts, reconcile, resizeDivider, splitAt, splitFocused, type Layout, type Split
 } from './layoutTree'
 
@@ -82,6 +82,21 @@ describe('close', () => {
     const l = splitFocused(two(), 'down').layout // p3 below p2
     expect(ids(closePane(l, 'p3'))).toEqual(['p1', 'p2'])
     expect((closePane(l, 'p3').root as Split).children).toHaveLength(2)
+  })
+})
+
+describe('closeRef', () => {
+  it('closes the pane showing the session and leaves the others', () => {
+    const l = closeRef(two(), B)
+    expect(refsOf(l)).toEqual(['$1'])
+    expect(l.focus).toBe('p1')
+  })
+  it('empties the last pane', () => {
+    expect(refsOf(closeRef(attachRef(emptyLayout(), A), A))).toEqual([null])
+  })
+  it('is a no-op for a session not shown', () => {
+    const l = two()
+    expect(closeRef(l, C)).toBe(l)
   })
 })
 

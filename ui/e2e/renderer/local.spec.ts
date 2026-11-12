@@ -74,6 +74,26 @@ test('suggestions list recent and repositories', async ({ page }) => {
   await expect(dialog).toBeHidden()
 })
 
+test('disconnect closes the pane but the session keeps running', async ({ page }) => {
+  const row = page.getByRole('button', { name: /alpha-work/ })
+  await row.click()
+  await expect(row).toHaveAttribute('aria-current', 'true')
+  await runInTerminal(page, 'export KEEP=still-$((40+2)); echo set-$((1+1))', 'set-2')
+  await row.click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Disconnect' }).click()
+  await expect(page.locator('.xterm')).toHaveCount(0)
+  await expect(row).toBeVisible()
+  await expect(row).not.toHaveAttribute('aria-current', 'true')
+  // Not open in a pane: nothing to disconnect.
+  await row.click({ button: 'right' })
+  await expect(page.getByRole('menuitem', { name: 'Kill session' })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: 'Disconnect' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  // Reattaching finds the same shell.
+  await row.click()
+  await runInTerminal(page, 'echo $KEEP', 'still-42')
+})
+
 test('rename via context menu, then kill with confirmation', async ({ page }) => {
   const row = page.getByRole('button', { name: /alpha-work/ })
   await row.click({ button: 'right' })

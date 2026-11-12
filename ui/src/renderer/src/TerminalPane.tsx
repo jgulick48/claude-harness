@@ -258,7 +258,7 @@ export function TerminalPane({ paneId, focused, host, sessionId, session, hostNa
           <button
             className="pane-close"
             aria-label="Close pane"
-            title="Close pane"
+            title="Close pane (the session keeps running)"
             onClick={() => dispatch({ type: 'closePane', id: paneId })}
           >
             ✕
