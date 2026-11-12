@@ -32,6 +32,8 @@ async function focusTerminal(page: Page): Promise<void> {
   await expect(rows(page)).toHaveCount(3)
   await rows(page).first().click()
   await page.locator('.xterm').click()
+  // The attached terminal focuses itself asynchronously; settle before keys.
+  await expect(page.locator('.xterm-helper-textarea').first()).toBeFocused()
 }
 
 test('create three sessions', async ({ page }) => {
@@ -83,6 +85,9 @@ test('Ctrl+2 attaches the second session; arrows and Enter navigate rows', async
   // match and can also hit other buttons (pane headers, menus) under load.
   await expect(rows(page).nth(1)).toHaveAttribute('aria-current', 'true')
   await expect(rows(page).nth(1)).toContainText(labels[1])
+  // Same race as above: the new terminal focuses itself once attached; wait,
+  // or it steals focus back from the filter and ArrowDown goes to the shell.
+  await expect(page.locator('.xterm-helper-textarea').first()).toBeFocused()
 
   await page.keyboard.press(keys.filter)
   await page.keyboard.press('ArrowDown')
