@@ -44,7 +44,8 @@ func TestSweepStatusFiles(t *testing.T) {
 	young := writeAged(t, dir, d, fresh) // in its grace period
 	hook := writeAged(t, dir, "hook-v2.sh", old)
 	other := writeAged(t, dir, "notes.txt", old)
-	upper := writeAged(t, dir, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", old)
+	// No lowercase twin among the files above: macOS filesystems ignore case.
+	upper := writeAged(t, dir, "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF", old)
 	// A symlink with a status name: its target must survive, and the link
 	// itself is skipped (only regular files are swept).
 	target := writeAged(t, t.TempDir(), "target", old)
