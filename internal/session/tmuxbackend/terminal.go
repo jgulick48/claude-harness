@@ -269,8 +269,15 @@ func (t *terminal) run(dropUntil uint64) {
 				t.sawExit = true
 				t.mu.Unlock()
 				return
-			case "window-pane-changed", "session-window-changed":
-				seq, ok := t.reseed(pane, n)
+			case "window-pane-changed", "session-window-changed", "layout-change":
+				if n.Seq <= dropUntil {
+					continue // predates the current seed
+				}
+				// layout-change follows every resize (ours included): tmux and
+				// xterm.js re-wrap existing lines differently, and the shell
+				// redraws its prompt on SIGWINCH, so without a fresh seed the
+				// two screens drift apart and lines get overwritten.
+				seq, ok := t.reseed(pane, n, n.Name == "layout-change")
 				if !ok {
 					return
 				}
@@ -282,9 +289,10 @@ func (t *terminal) run(dropUntil uint64) {
 	}
 }
 
-// reseed re-reads the active pane after a window/pane switch and, if it
-// changed, sends a fresh full-screen seed. ok is false if the terminal ended.
-func (t *terminal) reseed(cur string, n tmux.Notification) (seq uint64, ok bool) {
+// reseed re-reads the active pane after a window/pane switch or a resize and
+// sends a fresh full-screen seed: always when force (resize), otherwise only if
+// the active pane changed. ok is false if the terminal ended.
+func (t *terminal) reseed(cur string, n tmux.Notification, force bool) (seq uint64, ok bool) {
 	t.mu.Lock()
 	rows, sid := t.rows, t.sid
 	t.mu.Unlock()
@@ -303,7 +311,7 @@ func (t *terminal) reseed(cur string, n tmux.Notification) (seq uint64, ok bool)
 		t.b.log.Warn("tmux: re-seed failed", "session", t.id, "err", err)
 		return 0, true
 	}
-	if pi.pane == cur {
+	if pi.pane == cur && !force {
 		return 0, true // nothing emitted, so nothing to drop
 	}
 	t.mu.Lock()
@@ -379,14 +387,16 @@ func (t *terminal) Resize(cols, rows int) error {
 	if t.isClosed() {
 		return errors.New("terminal closed")
 	}
+	// Record the size first: the layout-change this triggers re-seeds the
+	// screen at t.rows, and may be handled before refresh-client returns.
+	t.mu.Lock()
+	t.rows = rows
+	t.mu.Unlock()
 	ctx, cancel := context.WithTimeout(t.ctx, commandTimout)
 	defer cancel()
 	if _, err := t.cc.Do(ctx, fmt.Sprintf("refresh-client -C %dx%d", cols, rows)); err != nil {
 		return err
 	}
-	t.mu.Lock()
-	t.rows = rows
-	t.mu.Unlock()
 	return nil
 }
 
