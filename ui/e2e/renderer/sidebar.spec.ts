@@ -24,6 +24,9 @@ async function create(page: Page, name: string): Promise<void> {
 
 /** Labels of the session rows, in sidebar order. */
 async function order(page: Page): Promise<string[]> {
+  // allInnerTexts doesn't wait: on a fresh page the session list arrives
+  // asynchronously, so wait for all three rows first.
+  await expect(rows(page)).toHaveCount(NAMES.length)
   return (await rows(page).locator('.row-label').allInnerTexts()).map((t) => t.trim())
 }
 
