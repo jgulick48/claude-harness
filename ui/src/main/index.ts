@@ -3,6 +3,7 @@ import { autoUpdater } from 'electron-updater'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { resolveCorePath, startCore, type CoreInfo, type RunningCore } from './core'
+import { externalLink } from './links'
 import { UpdateController } from './updater'
 
 type CoreStatus =
@@ -142,7 +143,8 @@ function createWindow(): void {
     mainWindow = null
   })
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/.test(url)) void shell.openExternal(url)
+    const link = externalLink(url)
+    if (link) void shell.openExternal(link)
     return { action: 'deny' }
   })
   mainWindow.webContents.on('did-finish-load', () => {
@@ -205,12 +207,27 @@ ipcMain.handle('clipboard:read', () => clipboard.readText())
 ipcMain.handle('clipboard:write', (_e, text: unknown) => {
   if (typeof text === 'string') clipboard.writeText(text)
 })
+// Terminal links (plain URLs and OSC 8 hyperlinks) open in the browser.
+ipcMain.handle('link:open', (_e, uri: unknown) => {
+  const link = externalLink(uri)
+  if (link) void shell.openExternal(link)
+})
+type TerminalMenuChoice = 'copy' | 'paste' | 'openLink' | 'copyLink' | null
 ipcMain.handle(
   'terminal:menu',
-  (e, hasSelection: unknown) =>
-    new Promise<'copy' | 'paste' | null>((resolve) => {
-      let choice: 'copy' | 'paste' | null = null
+  (e, hasSelection: unknown, uri: unknown) =>
+    new Promise<TerminalMenuChoice>((resolve) => {
+      let choice: TerminalMenuChoice = null
+      const link = externalLink(uri)
+      const items: MenuItemConstructorOptions[] = link
+        ? [
+            { label: 'Open Link', click: () => (choice = 'openLink') },
+            { label: 'Copy Link Address', click: () => (choice = 'copyLink') },
+            { type: 'separator' }
+          ]
+        : []
       const menu = Menu.buildFromTemplate([
+        ...items,
         { label: 'Copy', enabled: hasSelection === true, click: () => (choice = 'copy') },
         { label: 'Paste', click: () => (choice = 'paste') }
       ])

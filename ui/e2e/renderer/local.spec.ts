@@ -179,3 +179,64 @@ test('run as: a session as another user (fake sudo) shows the tag and starts in 
   await runInTerminal(page, 'pwd', join(env().core.home, 'proj/beta'))
   await shot(page, info, 'run-as-session')
 })
+
+test('terminal links: OSC 8 hyperlinks and plain URLs open, show their target, and can be copied', async ({ page }) => {
+  await page.getByRole('button', { name: 'New terminal', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'New terminal' })
+  await dialog.getByRole('combobox', { name: 'Directory' }).fill('~/proj/beta')
+  await dialog.getByLabel('Name (optional)').fill('links')
+  await dialog.getByLabel('Run as user (optional)').fill('') // remembered from another test
+  await dialog.getByRole('button', { name: 'Create' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(page.getByRole('button', { name: /links/ })).toHaveAttribute('aria-current', 'true')
+  // The label is computed by the shell so the typed command line doesn't match it.
+  await runInTerminal(
+    page,
+    `printf '\\033]8;;https://example.com/osc8?x=1\\033\\\\%s\\033]8;;\\033\\\\\\n' "osc-$((40+2))"`,
+    'osc-42'
+  )
+  const rows = page.locator('.xterm-rows')
+  // xterm redraws its rows (cursor blink), so the spans never count as stable
+  // for Playwright's actionability checks: drive the mouse by position.
+  // A redraw can catch the row between spans, so retry the lookup.
+  const center = async (text: string): Promise<{ x: number; y: number }> => {
+    let at: { x: number; y: number } | null = null
+    const find = async (): Promise<boolean> => {
+      const b = await rows.getByText(text, { exact: true }).boundingBox({ timeout: 1000 }).catch(() => null)
+      at = b && b.width > 0 ? { x: b.x + b.width / 2, y: b.y + b.height / 2 } : null
+      return at !== null
+    }
+    await expect.poll(find, { message: `${text} on screen` }).toBe(true)
+    return at!
+  }
+  const box = page.locator('.xterm').locator('xpath=..')
+  const osc = await center('osc-42')
+  await page.mouse.move(osc.x, osc.y)
+  // The tooltip shows the real target, whatever the link's text says.
+  await expect(box).toHaveAttribute('title', 'https://example.com/osc8?x=1')
+  await page.mouse.click(osc.x, osc.y)
+  await expect.poll(() => page.evaluate(() => window.__e2e.opened)).toEqual(['https://example.com/osc8?x=1'])
+
+  // Right-click on the link offers it; "Copy Link Address" puts it on the clipboard.
+  await page.evaluate(() => (window.__e2e.menuChoice = 'copyLink'))
+  await page.mouse.click(osc.x, osc.y, { button: 'right' })
+  await expect.poll(() => page.evaluate(() => window.__e2e.clipboard)).toBe('https://example.com/osc8?x=1')
+  expect(await page.evaluate(() => window.__e2e.menuLink)).toBe('https://example.com/osc8?x=1')
+
+  // Plain URLs in the output work the same way.
+  await runInTerminal(page, 'echo "https://example.com/plain-$((1+1))"', 'https://example.com/plain-2')
+  const plain = await center('https://example.com/plain-2')
+  await page.mouse.move(plain.x, plain.y)
+  await expect(box).toHaveAttribute('title', 'https://example.com/plain-2')
+  await page.mouse.click(plain.x, plain.y)
+  await expect
+    .poll(() => page.evaluate(() => window.__e2e.opened))
+    .toEqual(['https://example.com/osc8?x=1', 'https://example.com/plain-2'])
+
+  // Away from a link the menu gets no link.
+  await page.evaluate(() => (window.__e2e.menuChoice = null))
+  await page.mouse.move(osc.x + 400, osc.y)
+  await expect(box).not.toHaveAttribute('title')
+  await page.mouse.click(osc.x + 400, osc.y, { button: 'right' })
+  await expect.poll(() => page.evaluate(() => window.__e2e.menuLink)).toBeNull()
+})
