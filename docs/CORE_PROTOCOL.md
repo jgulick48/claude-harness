@@ -197,7 +197,12 @@ have the hooks installed. Instead:
   `sessions.list` poll and uses the file's state and time in place of the tmux
   options. A reported state wins over the active-pane check (the pane's command
   is `sudo`, or the wrapper shell where sudo doesn't use its own pty); an empty file falls back to `unknown`/`""` as above.
-  Core removes the file when the session is killed.
+  Core removes the file when the session is killed. Files of sessions that
+  ended some other way (the user exited the shell, the tmux server died) are
+  swept: at most every 10 minutes, after a successful list, core deletes status
+  files (and the hook's `<file>.<pid>` temp files) not written for an hour that
+  no live session references. A file still used by a session on another tmux
+  socket may be swept too; the hook recreates it on its next event.
 
 So status works for `command: "claude"` run-as sessions. A run-as `shell`
 session also has `HARNESS_STATUS_FILE` set, so it reports status only if Claude

@@ -57,8 +57,10 @@ type Backend struct {
 	// Run-as Claude status (see runas_status.go).
 	statusDir   string
 	statusMu    sync.Mutex
-	statusReady string // set once the status dir is prepared
-	statusBase  string // resolved status dir (override or by uid)
+	statusReady string    // set once the status dir is prepared
+	statusBase  string    // resolved status dir (override or by uid)
+	sweeping    bool      // a status-file sweep is running
+	lastSweep   time.Time // when the last sweep started
 
 	hostMu    sync.Mutex
 	hostCache session.Host
@@ -291,6 +293,7 @@ func (b *Backend) List(ctx context.Context) ([]session.Session, error) {
 	out, err := b.run.Output(ctx, "list-sessions", "-F", listFormat)
 	if err != nil {
 		if isNoServer(err) {
+			b.maybeSweepStatusFiles(nil) // no sessions: nothing references a file
 			return []session.Session{}, nil
 		}
 		return nil, b.mapError(err, "")
@@ -336,6 +339,7 @@ func (b *Backend) List(ctx context.Context) ([]session.Session, error) {
 		}
 	}
 	b.applyFileStatus(ctx, list, statusFiles, panes)
+	b.maybeSweepStatusFiles(statusFiles)
 	sort.SliceStable(list, func(i, j int) bool { return list[i].Created < list[j].Created })
 	return list, nil
 }

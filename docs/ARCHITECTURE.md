@@ -168,7 +168,8 @@ tmux set-option -t <id> @harness_managed 1
   keeps a `1733` status directory (`/tmp/claude-harness-status-<uid>`) holding
   the hook script, a hooks-only settings file and one status file per run-as
   session (`@harness_status_file`). The v2 hook writes `<state> <epoch>` to
-  `$HARNESS_STATUS_FILE`; `List` reads all such files in one exec. See
+  `$HARNESS_STATUS_FILE`; `List` reads all such files in one exec and, every
+  10 minutes, sweeps hour-old files no live session references. See
   CORE_PROTOCOL.md §5.2.
 
 ### 4.3 Attaching
