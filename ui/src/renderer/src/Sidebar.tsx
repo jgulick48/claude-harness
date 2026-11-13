@@ -19,7 +19,7 @@ import {
 } from './prefs'
 import { openAppearance } from './appearance'
 import { visibleRefs } from './layout'
-import { highlightParts, matchCandidate } from './sidebarFilter'
+import { bestMatch, highlightParts, matchCandidate } from './sidebarFilter'
 import {
   clampWidth,
   moveNav,
@@ -433,7 +433,7 @@ export function Sidebar(): React.JSX.Element {
           const label = sessionLabel(s)
           const path = displayPath(s.cwd, host.home ?? '')
           const m = matchCandidate(query, { label, path, host: host.name })
-          return m ? [{ s, label, path, labelIndices: m.labelIndices }] : []
+          return m ? [{ s, label, path, labelIndices: m.labelIndices, score: m.score }] : []
         })
       : []
     return { host, ok, items }
@@ -532,7 +532,11 @@ export function Sidebar(): React.JSX.Element {
       else focusTerminal()
     } else if (e.key === 'Enter') {
       e.preventDefault()
-      if (nav[0]) (e.shiftKey ? splitRef : attachRef)(nav[0])
+      // The best match, not just the first row (see bestMatch).
+      const target = filtering
+        ? bestMatch(shownGroups.flatMap((g) => g.items.map((i) => ({ ref: { host: g.host.id, session: i.s.id }, score: i.score }))))
+        : nav[0]
+      if (target) (e.shiftKey ? splitRef : attachRef)(target)
     } else if (e.key === 'ArrowDown') {
       e.preventDefault()
       if (nav[0]) focusRow(nav[0])
