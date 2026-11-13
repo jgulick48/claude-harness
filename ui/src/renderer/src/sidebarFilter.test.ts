@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fuzzyMatch, highlightParts, matchCandidate } from './sidebarFilter'
+import { bestMatch, fuzzyMatch, highlightParts, matchCandidate } from './sidebarFilter'
 
 describe('fuzzyMatch', () => {
   it('matches empty query with no indices', () => {
@@ -48,5 +48,29 @@ describe('highlightParts', () => {
       { text: 'd', hit: false }
     ])
     expect(highlightParts('', [])).toEqual([])
+  })
+})
+
+describe('bestMatch', () => {
+  it('picks the highest score, the first on a tie', () => {
+    expect(bestMatch([])).toBeUndefined()
+    expect(bestMatch([{ ref: 'a', score: 1 }, { ref: 'b', score: 3 }, { ref: 'c', score: 3 }])).toBe('b')
+  })
+
+  // Seen on macOS CI: "gamma" fuzzy-matched alpha-work's long temp path, and
+  // Enter attached alpha-work because it came first.
+  it('prefers a name match over a path that happens to fuzzy-match', () => {
+    const home = '/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/harness-e2e-jx859M/home'
+    const sessions = [
+      { ref: 'alpha', label: 'alpha-work', path: home + '/proj/alpha' },
+      { ref: 'beta', label: 'beta-build', path: home + '/proj/beta' },
+      { ref: 'gamma', label: 'gamma-docs', path: home + '/src/gamma' }
+    ]
+    const scored = sessions.flatMap((s) => {
+      const m = matchCandidate('gamma', { label: s.label, path: s.path, host: 'This computer' })
+      return m ? [{ ref: s.ref, score: m.score }] : []
+    })
+    expect(scored[0]?.ref).toBe('alpha') // the path really does match
+    expect(bestMatch(scored)).toBe('gamma')
   })
 })
