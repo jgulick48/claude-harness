@@ -81,18 +81,39 @@ export function TerminalPane({ paneId, focused, host, sessionId, session, hostNa
     const wasAuto = autoRef.current
     autoRef.current = false
 
+    // Links: plain URLs (WebLinksAddon) and OSC 8 hyperlinks (linkHandler),
+    // which Claude Code prints. Without a linkHandler xterm falls back to a
+    // confirm() and an about:blank window that main blocks, so clicking did
+    // nothing. Clicks open the link in the browser (main allows http(s) only);
+    // the pointer's link is shown as a tooltip, since an OSC 8 link's text
+    // need not match its target, and offered in the right-click menu.
+    let hovered: string | null = null
+    const hover = (_e: MouseEvent, uri: string): void => {
+      hovered = uri
+      box.title = uri
+    }
+    const leave = (): void => {
+      hovered = null
+      box.removeAttribute('title')
+    }
+    const open = (e: MouseEvent, uri: string): void => {
+      // xterm activates on mouseup of any button; right-click is the menu.
+      if (e.button !== 0) return
+      void window.harness.openLink(uri)
+    }
     const ap = appearanceRef.current
     const term = new Terminal({
       fontFamily: ap.fontFamily ?? FONT,
       fontSize: ap.fontSize,
       cursorBlink: true,
       scrollback: 5000,
-      theme: ap.theme ?? readTheme()
+      theme: ap.theme ?? readTheme(),
+      linkHandler: { activate: open, hover, leave }
     })
     termRef.current = term
     const fit = new FitAddon()
     term.loadAddon(fit)
-    term.loadAddon(new WebLinksAddon((_e, uri) => window.open(uri)))
+    term.loadAddon(new WebLinksAddon(open, { hover, leave }))
     term.open(box)
 
     // Clipboard: see terminalKeys.ts for why Ctrl+V needs handling at all.
@@ -121,9 +142,12 @@ export function TerminalPane({ paneId, focused, host, sessionId, session, hostNa
     })
     const onContextMenu = (e: MouseEvent): void => {
       e.preventDefault()
-      void window.harness.showTerminalMenu(term.hasSelection()).then((choice) => {
+      const link = hovered
+      void window.harness.showTerminalMenu(term.hasSelection(), link).then((choice) => {
         if (choice === 'paste') paste()
         else if (choice === 'copy') copy()
+        else if (choice === 'openLink' && link) void window.harness.openLink(link)
+        else if (choice === 'copyLink' && link) void window.harness.writeClipboard(link)
         term.focus()
       })
     }

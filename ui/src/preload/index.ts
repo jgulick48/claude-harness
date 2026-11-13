@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { CoreInfo, CoreStatus, UpdateStatus } from './index.d'
+import type { CoreInfo, CoreStatus, TerminalMenuChoice, UpdateStatus } from './index.d'
 
 contextBridge.exposeInMainWorld('harness', {
   getCoreInfo: (): Promise<CoreInfo | { error: string }> => ipcRenderer.invoke('core:info'),
@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('harness', {
   writeClipboard: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:write', text),
   // Syncs Electron's nativeTheme (window frame, menus, scrollbars) with the app theme.
   setThemeSource: (source: 'system' | 'light' | 'dark'): void => ipcRenderer.send('theme:source', source),
-  showTerminalMenu: (hasSelection: boolean): Promise<'copy' | 'paste' | null> =>
-    ipcRenderer.invoke('terminal:menu', hasSelection)
+  showTerminalMenu: (hasSelection: boolean, link?: string | null): Promise<TerminalMenuChoice> =>
+    ipcRenderer.invoke('terminal:menu', hasSelection, link ?? null),
+  openLink: (url: string): Promise<void> => ipcRenderer.invoke('link:open', url)
 })

@@ -1,4 +1,4 @@
-import type { CoreInfo, HarnessApi } from '../../src/preload/index.d'
+import type { CoreInfo, HarnessApi, TerminalMenuChoice } from '../../src/preload/index.d'
 
 /**
  * Every key of the real preload bridge. Typed as Record<keyof HarnessApi, true>
@@ -19,7 +19,8 @@ export const bridgeKeys: Record<keyof HarnessApi, true> = {
   readClipboard: true,
   writeClipboard: true,
   setThemeSource: true,
-  showTerminalMenu: true
+  showTerminalMenu: true,
+  openLink: true
 }
 
 export interface E2EHooks {
@@ -35,6 +36,11 @@ export interface E2EHooks {
   clipboard: string
   /** Last value passed to setThemeSource, or null. */
   themeSource: 'system' | 'light' | 'dark' | null
+  /** URLs passed to openLink, in order. */
+  opened: string[]
+  /** What the fake terminal menu returns; the link it was shown for. */
+  menuChoice: TerminalMenuChoice
+  menuLink: string | null
 }
 
 declare global {
@@ -48,7 +54,17 @@ declare global {
  * `HarnessApi` annotation makes the compiler reject a missing or extra member.
  */
 export function installFakeBridge(info: CoreInfo): void {
-  const hooks: E2EHooks = { resume: null, resizes: 0, attention: -1, focused: 0, clipboard: '', themeSource: null }
+  const hooks: E2EHooks = {
+    resume: null,
+    resizes: 0,
+    attention: -1,
+    focused: 0,
+    clipboard: '',
+    themeSource: null,
+    opened: [],
+    menuChoice: null,
+    menuLink: null
+  }
   window.__e2e = hooks
   // Count term.resize requests (JSON text frames), e.g. to catch refit loops.
   const send = WebSocket.prototype.send
@@ -88,7 +104,13 @@ export function installFakeBridge(info: CoreInfo): void {
     setThemeSource: (source) => {
       hooks.themeSource = source
     },
-    showTerminalMenu: async () => null
+    showTerminalMenu: async (_hasSelection, link) => {
+      hooks.menuLink = link ?? null
+      return hooks.menuChoice
+    },
+    openLink: async (url) => {
+      hooks.opened.push(url)
+    }
   }
   window.harness = api
 }
