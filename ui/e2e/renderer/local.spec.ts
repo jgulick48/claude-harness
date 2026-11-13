@@ -241,7 +241,7 @@ test('terminal links: OSC 8 hyperlinks and plain URLs open, show their target, a
   await expect.poll(() => page.evaluate(() => window.__e2e.menuLink)).toBeNull()
 })
 
-test('copying from a full-screen program: OSC 52 reaches the clipboard, Shift+drag still selects', async ({ page }) => {
+test('copying from a full-screen program: OSC 52 reaches the clipboard, a forced selection copies from the menu', async ({ page }) => {
   await page.getByRole('button', { name: 'New terminal', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'New terminal' })
   await dialog.getByRole('combobox', { name: 'Directory' }).fill('~/proj/beta')
@@ -268,14 +268,21 @@ test('copying from a full-screen program: OSC 52 reaches the clipboard, Shift+dr
     .poll(async () => (b = await target.boundingBox({ timeout: 1000 }).catch(() => null)) !== null)
     .toBe(true)
   const { x, y, width, height } = b!
-  await page.keyboard.down('Shift')
+  // xterm forces a selection with Option on macOS (macOptionClickForcesSelection), Shift elsewhere.
+  const force = process.platform === 'darwin' ? 'Alt' : 'Shift'
+  await page.keyboard.down(force)
   await page.mouse.move(x + 1, y + height / 2)
   await page.mouse.down()
   await page.mouse.move(x + width - 1, y + height / 2, { steps: 5 })
   await page.mouse.up()
-  await page.keyboard.up('Shift')
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+c' : 'Control+Shift+C')
+  await page.keyboard.up(force)
+  // Moving the pointer afterwards (reported to the program) must not clear it.
+  await page.mouse.move(x + width / 2, y + height * 3, { steps: 5 })
+  // Copy through the terminal menu: the same path on every platform.
+  await page.evaluate(() => (window.__e2e.menuChoice = 'copy'))
+  await page.mouse.click(x + width / 2, y + height / 2, { button: 'right' })
   await expect.poll(() => page.evaluate(() => window.__e2e.clipboard)).toBe('pick-25')
+  await page.evaluate(() => (window.__e2e.menuChoice = null))
   // Leave the shell sane for anything after this.
   await runInTerminal(page, `printf '\\033[?1003l\\033[?1006l'; echo done-$((3+4))`, 'done-7')
 })
