@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { focusGeneration } from './focusClaims'
+import { osc52Text } from './osc52'
 import { clipboardAction } from './terminalKeys'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -108,13 +109,24 @@ export function TerminalPane({ paneId, focused, host, sessionId, session, hostNa
       cursorBlink: true,
       scrollback: 5000,
       theme: ap.theme ?? readTheme(),
-      linkHandler: { activate: open, hover, leave }
+      linkHandler: { activate: open, hover, leave },
+      // While a program has mouse tracking on (Claude Code full-screen), drags
+      // go to the program. Shift+drag selects in the terminal anyway; on macOS
+      // xterm uses Option+drag for that, but only with this option.
+      macOptionClickForcesSelection: true
     })
     termRef.current = term
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.loadAddon(new WebLinksAddon(open, { hover, leave }))
     term.open(box)
+    // Programs copy to the clipboard with OSC 52 (Claude Code does for its own
+    // mouse selections); xterm ignores it unless handled. Writes only.
+    term.parser.registerOscHandler(52, (data) => {
+      const text = osc52Text(data)
+      if (text !== null && !disposed) void window.harness.writeClipboard(text)
+      return true
+    })
 
     // Clipboard: see terminalKeys.ts for why Ctrl+V needs handling at all.
     const isMac = navigator.platform.toLowerCase().includes('mac')
@@ -125,8 +137,7 @@ export function TerminalPane({ paneId, focused, host, sessionId, session, hostNa
         if (text && !disposed) term.paste(text)
       })
     }
-    const copy = (): void => {
-      const sel = term.getSelection()
+    const copy = (sel = term.getSelection()): void => {
       if (sel) void window.harness.writeClipboard(sel)
       term.clearSelection()
     }
@@ -140,12 +151,26 @@ export function TerminalPane({ paneId, focused, host, sessionId, session, hostNa
       else copy()
       return false
     })
+    // While a program has mouse tracking on (Claude Code full-screen), xterm
+    // reports mouse events to it as input, and any input clears the
+    // selection, so a Shift/Option+drag selection vanished as soon as the
+    // pointer moved or the right button went down for the menu. Keep those
+    // events from xterm while they would only destroy the selection: motion
+    // with no button held while something is selected, and the right button
+    // (the menu's) always. Capture phase, so this runs before xterm.
+    const tracking = (): boolean => term.modes.mouseTrackingMode !== 'none'
+    const guardMouse = (e: MouseEvent): void => {
+      if (!tracking()) return
+      if (e.type === 'mousemove' ? e.buttons === 0 && term.hasSelection() : e.button === 2) e.stopPropagation()
+    }
+    for (const t of ['mousemove', 'mousedown', 'mouseup'] as const) box.addEventListener(t, guardMouse, true)
     const onContextMenu = (e: MouseEvent): void => {
       e.preventDefault()
       const link = hovered
-      void window.harness.showTerminalMenu(term.hasSelection(), link).then((choice) => {
+      const sel = term.getSelection()
+      void window.harness.showTerminalMenu(sel !== '', link).then((choice) => {
         if (choice === 'paste') paste()
-        else if (choice === 'copy') copy()
+        else if (choice === 'copy') copy(sel)
         else if (choice === 'openLink' && link) void window.harness.openLink(link)
         else if (choice === 'copyLink' && link) void window.harness.writeClipboard(link)
         term.focus()
@@ -245,6 +270,7 @@ export function TerminalPane({ paneId, focused, host, sessionId, session, hostNa
     return () => {
       disposed = true
       box.removeEventListener('contextmenu', onContextMenu)
+      for (const t of ['mousemove', 'mousedown', 'mouseup'] as const) box.removeEventListener(t, guardMouse, true)
       if (debounce) clearTimeout(debounce)
       ro.disconnect()
       mq.removeEventListener('change', onScheme)
