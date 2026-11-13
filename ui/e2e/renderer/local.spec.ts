@@ -198,10 +198,16 @@ test('terminal links: OSC 8 hyperlinks and plain URLs open, show their target, a
   const rows = page.locator('.xterm-rows')
   // xterm redraws its rows (cursor blink), so the spans never count as stable
   // for Playwright's actionability checks: drive the mouse by position.
+  // A redraw can catch the row between spans, so retry the lookup.
   const center = async (text: string): Promise<{ x: number; y: number }> => {
-    const box = await rows.getByText(text, { exact: true }).boundingBox()
-    if (!box) throw new Error(`${text} not on screen`)
-    return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    let at: { x: number; y: number } | null = null
+    const find = async (): Promise<boolean> => {
+      const b = await rows.getByText(text, { exact: true }).boundingBox({ timeout: 1000 }).catch(() => null)
+      at = b && b.width > 0 ? { x: b.x + b.width / 2, y: b.y + b.height / 2 } : null
+      return at !== null
+    }
+    await expect.poll(find, { message: `${text} on screen` }).toBe(true)
+    return at!
   }
   const box = page.locator('.xterm').locator('xpath=..')
   const osc = await center('osc-42')
@@ -229,9 +235,8 @@ test('terminal links: OSC 8 hyperlinks and plain URLs open, show their target, a
 
   // Away from a link the menu gets no link.
   await page.evaluate(() => (window.__e2e.menuChoice = null))
-  const away = await center('osc-42')
-  await page.mouse.move(away.x + 400, away.y)
+  await page.mouse.move(osc.x + 400, osc.y)
   await expect(box).not.toHaveAttribute('title')
-  await page.mouse.click(away.x + 400, away.y, { button: 'right' })
+  await page.mouse.click(osc.x + 400, osc.y, { button: 'right' })
   await expect.poll(() => page.evaluate(() => window.__e2e.menuLink)).toBeNull()
 })
