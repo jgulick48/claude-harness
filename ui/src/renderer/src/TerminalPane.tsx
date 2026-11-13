@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { focusGeneration } from './focusClaims'
+import { osc52Text } from './osc52'
 import { clipboardAction } from './terminalKeys'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -108,13 +109,24 @@ export function TerminalPane({ paneId, focused, host, sessionId, session, hostNa
       cursorBlink: true,
       scrollback: 5000,
       theme: ap.theme ?? readTheme(),
-      linkHandler: { activate: open, hover, leave }
+      linkHandler: { activate: open, hover, leave },
+      // While a program has mouse tracking on (Claude Code full-screen), drags
+      // go to the program. Shift+drag selects in the terminal anyway; on macOS
+      // xterm uses Option+drag for that, but only with this option.
+      macOptionClickForcesSelection: true
     })
     termRef.current = term
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.loadAddon(new WebLinksAddon(open, { hover, leave }))
     term.open(box)
+    // Programs copy to the clipboard with OSC 52 (Claude Code does for its own
+    // mouse selections); xterm ignores it unless handled. Writes only.
+    term.parser.registerOscHandler(52, (data) => {
+      const text = osc52Text(data)
+      if (text !== null && !disposed) void window.harness.writeClipboard(text)
+      return true
+    })
 
     // Clipboard: see terminalKeys.ts for why Ctrl+V needs handling at all.
     const isMac = navigator.platform.toLowerCase().includes('mac')

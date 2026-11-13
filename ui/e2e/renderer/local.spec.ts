@@ -240,3 +240,42 @@ test('terminal links: OSC 8 hyperlinks and plain URLs open, show their target, a
   await page.mouse.click(osc.x + 400, osc.y, { button: 'right' })
   await expect.poll(() => page.evaluate(() => window.__e2e.menuLink)).toBeNull()
 })
+
+test('copying from a full-screen program: OSC 52 reaches the clipboard, Shift+drag still selects', async ({ page }) => {
+  await page.getByRole('button', { name: 'New terminal', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'New terminal' })
+  await dialog.getByRole('combobox', { name: 'Directory' }).fill('~/proj/beta')
+  await dialog.getByLabel('Name (optional)').fill('osc52')
+  await dialog.getByLabel('Run as user (optional)').fill('') // remembered from another test
+  await dialog.getByRole('button', { name: 'Create' }).click()
+  await expect(dialog).toBeHidden()
+
+  // What Claude Code does after you select text with the mouse.
+  await runInTerminal(page, `printf '\\033]52;c;%s\\007' "$(printf 'copied-%s' $((6*7)) | base64)"; echo sent-$((2+3))`, 'sent-5')
+  await expect.poll(() => page.evaluate(() => window.__e2e.clipboard)).toBe('copied-42')
+  // A clipboard query is not answered (nothing is typed back into the shell).
+  await runInTerminal(page, `printf '\\033]52;c;?\\007'; echo q-$((1+1))`, 'q-2')
+  // A reply would land at the new prompt as typed input; it stays empty.
+  await page.waitForTimeout(300)
+  await expect(page.locator('.xterm-rows')).toContainText(/q-2\$\s*$/)
+
+  // Turn on any-motion mouse tracking (SGR), as Claude Code's full-screen mode
+  // does; a plain drag then goes to the program, Shift+drag selects anyway.
+  await runInTerminal(page, `printf '\\033[?1003h\\033[?1006h'; echo pick-$((5*5))`, 'pick-25')
+  const target = page.locator('.xterm-rows').getByText('pick-25', { exact: true })
+  let b: { x: number; y: number; width: number; height: number } | null = null
+  await expect
+    .poll(async () => (b = await target.boundingBox({ timeout: 1000 }).catch(() => null)) !== null)
+    .toBe(true)
+  const { x, y, width, height } = b!
+  await page.keyboard.down('Shift')
+  await page.mouse.move(x + 1, y + height / 2)
+  await page.mouse.down()
+  await page.mouse.move(x + width - 1, y + height / 2, { steps: 5 })
+  await page.mouse.up()
+  await page.keyboard.up('Shift')
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+c' : 'Control+Shift+C')
+  await expect.poll(() => page.evaluate(() => window.__e2e.clipboard)).toBe('pick-25')
+  // Leave the shell sane for anything after this.
+  await runInTerminal(page, `printf '\\033[?1003l\\033[?1006l'; echo done-$((3+4))`, 'done-7')
+})
