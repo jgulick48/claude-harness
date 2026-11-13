@@ -90,3 +90,14 @@ export function highlightParts(text: string, indices: readonly number[]): { text
   }
   return parts
 }
+
+/**
+ * The best-scoring entry (the first one on a tie), for Enter in the filter.
+ * Display order alone isn't enough: paths match too, and a long path can
+ * fuzzy-match a query meant for another session's name.
+ */
+export function bestMatch<T>(items: readonly { ref: T; score: number }[]): T | undefined {
+  let best: { ref: T; score: number } | undefined
+  for (const it of items) if (!best || it.score > best.score) best = it
+  return best?.ref
+}
