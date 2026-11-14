@@ -610,3 +610,30 @@ body {
 .usage-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
 .usage-history-table .usage-session { max-width: 260px; }
 .usage-num { text-align: right !important; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Send prompt dialog and sidebar multi-select */
+.modal.prompt-dialog { width: min(560px, 94vw); max-height: 90vh; overflow: auto; }
+.prompt-text {
+  font: inherit; font-size: 13px; padding: 6px 8px; resize: vertical; min-height: 80px;
+  color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+}
+.prompt-text:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.prompt-targets { max-height: 220px; overflow: auto; border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; }
+.prompt-host { font-size: 11px; font-weight: 600; color: var(--fg-muted); margin: 4px 0 2px; }
+.prompt-group ul { list-style: none; margin: 0; padding: 0; }
+.prompt-group li { display: flex; align-items: baseline; gap: 8px; padding: 2px 0; font-size: 13px; }
+.prompt-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-status { color: var(--fg-muted); font-size: 12px; }
+.prompt-outcome { font-size: 12px; color: var(--fg-muted); text-align: right; overflow-wrap: anywhere; max-width: 55%; }
+.prompt-outcome.sent { color: var(--ok); }
+.prompt-outcome.failed { color: var(--error); }
+li[data-state='send'] .prompt-outcome { color: var(--fg); }
+
+.row.selected { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 0 0 0 1px var(--accent); }
+.selection-bar {
+  position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px;
+  padding: 4px 8px; margin-bottom: 4px; font-size: 12px;
+  background: var(--bg-sidebar); border: 1px solid var(--accent); border-radius: 4px;
+}
+.selection-bar .selection-count { flex: 1; }
+.filter-actions { display: flex; gap: 12px; padding: 0 2px 6px; font-size: 11px; }

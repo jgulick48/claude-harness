@@ -5,6 +5,8 @@ import { UpdateBanner } from './UpdateBanner'
 import { HooksDialog, type HooksMode } from './HooksDialog'
 import { HostCheckDialog } from './HostCheckDialog'
 import { UsageDialog } from './UsageDialog'
+import { SendPromptDialog } from './SendPromptDialog'
+import { keysWithStatus, pruneSelection, selKey, type PromptCandidate } from './sendPrompt'
 import { UsageIndicator } from './UsageIndicator'
 import { canRecordUsage, canStopUsage } from './usage'
 import { canRunCheckFromStatus } from './hostCheck'
@@ -217,6 +219,7 @@ function SettingsMenu({
   onNextWaiting,
   onAppearance,
   onUsage,
+  onSendPrompt,
   onClose
 }: {
   x: number
@@ -226,6 +229,7 @@ function SettingsMenu({
   onNextWaiting: () => void
   onAppearance: () => void
   onUsage: () => void
+  onSendPrompt: () => void
   onClose: () => void
 }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
@@ -237,6 +241,9 @@ function SettingsMenu({
       </button>
       <button className="ctx-item" role="menuitem" onClick={onNextWaiting}>
         Next waiting session <span className="ctx-keys">{IS_MAC ? '⇧⌘J' : 'Ctrl+Shift+J'}</span>
+      </button>
+      <button className="ctx-item" role="menuitem" onClick={onSendPrompt}>
+        Send prompt to sessions…
       </button>
       <button className="ctx-item" role="menuitem" onClick={onUsage}>
         Claude usage…
@@ -491,6 +498,10 @@ export function Sidebar(): React.JSX.Element {
   const [hooksDismissed, setHooksDismissed] = useState<Set<string>>(new Set())
   const [checkHost, setCheckHost] = useState<Host | null>(null)
   const [usageOpen, setUsageOpen] = useState(false)
+  // Multi-select for "Send prompt…": keys from selKey. promptFor is the
+  // selection the open dialog works on.
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
+  const [promptFor, setPromptFor] = useState<ReadonlySet<string> | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -505,6 +516,24 @@ export function Sidebar(): React.JSX.Element {
   const filterRef = useRef<HTMLInputElement>(null)
   const asideRef = useRef<HTMLElement>(null)
   const pendingFilterFocus = useRef(false)
+
+  const allCandidates: PromptCandidate[] = state.hosts.flatMap((h) =>
+    h.state === 'connected' ? (state.sessions[h.id] ?? []).map((session) => ({ host: h.id, hostName: h.name, session })) : []
+  )
+  // Sessions that disappear leave the selection.
+  useEffect(() => {
+    setSelected((cur) => pruneSelection(cur, allCandidates))
+  })
+  const toggleSelected = (host: string, session: string): void =>
+    setSelected((cur) => {
+      const n = new Set(cur)
+      const k = selKey(host, session)
+      if (!n.delete(k)) n.add(k)
+      return n
+    })
+  const clearSelection = (): void => setSelected(new Set())
+  // With nothing selected, "Send prompt…" offers every idle session.
+  const openPrompt = (): void => setPromptFor(selected.size > 0 ? selected : keysWithStatus(allCandidates, 'idle'))
 
   const query = rail ? '' : filter
   const filtering = query.trim() !== ''
@@ -612,6 +641,11 @@ export function Sidebar(): React.JSX.Element {
   }
 
   const onListKey = (e: React.KeyboardEvent): void => {
+    if (e.key === 'Escape' && selected.size > 0) {
+      e.preventDefault()
+      clearSelection()
+      return
+    }
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
     const el = document.activeElement as HTMLElement | null
     const cur = el?.dataset.row !== undefined ? { host: el.dataset.host ?? '', session: el.dataset.session ?? '' } : null
@@ -630,6 +664,7 @@ export function Sidebar(): React.JSX.Element {
     if (e.key === 'Escape') {
       e.preventDefault()
       if (filter) setFilter('')
+      else if (selected.size > 0) clearSelection()
       else focusTerminal()
     } else if (e.key === 'Enter') {
       e.preventDefault()
@@ -766,6 +801,17 @@ export function Sidebar(): React.JSX.Element {
         </span>
       </header>
       <div className="sidebar-body" ref={listRef} onKeyDown={onListKey}>
+        {selected.size > 0 && (
+          <div className="selection-bar" data-testid="selection-bar" role="group" aria-label="Selected sessions">
+            <span className="selection-count">{selected.size} selected</span>
+            <button className="btn small" onClick={openPrompt}>
+              Send prompt…
+            </button>
+            <button className="btn small" onClick={clearSelection}>
+              Clear
+            </button>
+          </div>
+        )}
         {state.hosts.length === 0 && <p className="muted">{connected ? 'No hosts' : 'Waiting for core…'}</p>}
         {filtering && shownGroups.length === 0 && (
           <p className="muted no-matches" role="status">
@@ -918,6 +964,7 @@ export function Sidebar(): React.JSX.Element {
                   const isOpen = !isActive && visible.has(`${host.id}/${s.id}`)
                   const path = displayPath(s.cwd, host.home ?? '')
                   const isRenaming = renaming?.host === host.id && renaming.id === s.id
+                  const isSelected = selected.has(selKey(host.id, s.id))
                   const attach = (): void => dispatch({ type: 'attach', ref: { host: host.id, session: s.id } })
                   return (
                     <div
@@ -928,10 +975,20 @@ export function Sidebar(): React.JSX.Element {
                       data-open={isOpen ? 'true' : undefined}
                       role="button"
                       tabIndex={0}
-                      className={`row${isActive ? ' active' : ''}${isOpen ? ' open' : ''}`}
+                      className={`row${isActive ? ' active' : ''}${isOpen ? ' open' : ''}${isSelected ? ' selected' : ''}`}
                       aria-current={isActive ? 'true' : undefined}
-                      onClick={() => !isRenaming && attach()}
+                      aria-selected={isSelected}
+                      onClick={(e) => {
+                        if (isRenaming) return
+                        // Ctrl+click (Cmd+click on macOS) selects instead of attaching.
+                        if (IS_MAC ? e.metaKey : e.ctrlKey) toggleSelected(host.id, s.id)
+                        else attach()
+                      }}
                       onKeyDown={(e) => {
+                        if (e.key === ' ' && !isRenaming && e.target === e.currentTarget) {
+                          e.preventDefault()
+                          toggleSelected(host.id, s.id)
+                        }
                         if (e.key === 'Enter' && !isRenaming && e.target === e.currentTarget) {
                           e.preventDefault()
                           if (e.shiftKey) splitRef({ host: host.id, session: s.id }, 'right')
@@ -991,6 +1048,22 @@ export function Sidebar(): React.JSX.Element {
         })}
       </div>
       <div className="sidebar-filter">
+        <div className="filter-actions">
+          <button
+            className="link-button"
+            title="Select every idle session (to send a prompt)"
+            onClick={() => setSelected(keysWithStatus(allCandidates, 'idle'))}
+          >
+            Select idle
+          </button>
+          <button
+            className="link-button"
+            title="Select every session waiting for input (to send a prompt)"
+            onClick={() => setSelected(keysWithStatus(allCandidates, 'waiting'))}
+          >
+            Select waiting
+          </button>
+        </div>
         <input
           ref={filterRef}
           className="filter-input"
@@ -1082,6 +1155,10 @@ export function Sidebar(): React.JSX.Element {
             setSettings(null)
             setUsageOpen(true)
           }}
+          onSendPrompt={() => {
+            setSettings(null)
+            openPrompt()
+          }}
           onToggleNotify={() => {
             const v = !notify
             saveFlag(NOTIFICATIONS_KEY, v)
@@ -1102,6 +1179,15 @@ export function Sidebar(): React.JSX.Element {
             setCheckHost(null)
             setHooksDialog({ host: h, mode: h.claudeHooks === 'outdated' ? 'update' : 'install' })
           }}
+        />
+      )}
+      {promptFor && (
+        <SendPromptDialog
+          hosts={state.hosts}
+          sessions={state.sessions}
+          selection={promptFor}
+          onClose={() => setPromptFor(null)}
+          onSent={clearSelection}
         />
       )}
       {usageOpen && (

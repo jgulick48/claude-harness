@@ -85,7 +85,8 @@ exactly one reply with the same `id`: either
 `{"type":"error","id":<int>,"message":"…","code":"<code>"}`.
 
 Error codes: `bad_request`, `not_found` (unknown host/session/stream),
-`unavailable` (host can't run tmux), `internal`.
+`unavailable` (host can't run tmux), `busy` (the session can't take a prompt
+right now, see `sessions.sendPrompt`), `internal`.
 
 ### 4.3 Events
 
@@ -141,6 +142,25 @@ Session: {"id":"$3","name":"h-api-1","harnessName":"","managed":true,"cwd":"/hom
 | `sessions.kill` | `host`, `session` | `null` |
 | `sessions.rename` | `host`, `session`, `name` (`""` clears it) | `null`. Sets the display name only. |
 | `sessions.setColor` | `host`, `session`, `color` (one of the colour names above; `""` clears it) | `null`. Sets the colour tag, stored in the tmux session option `@harness_color` so every client sees it. Any other value is `bad_request`. |
+| `sessions.sendPrompt` | `host`, `session`, `text`, `allowWaiting` (optional boolean, default `false`) | `null`. Types `text` into the session's active pane as one paste and presses Enter. See "Sending prompts" below. A host whose backend can't do it gives `unavailable`. |
+
+Sending prompts (`sessions.sendPrompt`, additive, no protocol version change).
+The core, not the UI, decides whether a prompt may be sent:
+
+- It re-reads the session's Claude status itself at send time. `idle` is
+  allowed; `waiting` only with `allowWaiting: true` (text typed into a waiting
+  session answers its question or permission prompt). Anything else (`working`,
+  `unknown`, no Claude / a plain shell) is refused with error code `busy`; the
+  message names the status. A session that doesn't exist is `not_found`.
+  Run-as sessions follow the same rules (their status comes from the status file).
+- `text` is required. The core normalizes CRLF and CR to LF, drops trailing
+  newlines and removes every control character except `\n` and `\t` (ESC
+  included, so no escape sequences or paste-end injection). What is left must
+  not be empty and at most 16 KiB, otherwise `bad_request`.
+- Delivery: the text goes into a uniquely named tmux buffer, is pasted into the
+  session's active pane with `paste-buffer -p -r -d` (bracketed paste when the
+  application asked for it, so newlines do not submit early; LF is kept as LF),
+  and after about 150 ms `Enter` is sent. The buffer is always removed.
 
 Event `hosts.changed`, pushed on connect and whenever any host's info or the
 set of hosts changes: `{"type":"event","event":"hosts.changed","hosts":[Host]}`.
