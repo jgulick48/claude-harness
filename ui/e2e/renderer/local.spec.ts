@@ -295,8 +295,10 @@ test('find in terminal: count, next, options, invalid regex, Escape returns focu
   await dialog.getByLabel('Run as user (optional)').fill('') // remembered from another test
   await dialog.getByRole('button', { name: 'Create' }).click()
   await expect(dialog).toBeHidden()
-  // The command line splits the word, so only the output lines match "alpha".
-  await runInTerminal(page, `printf '%s\\n' "al""pha one" "be""ta two" "al""pha three"; echo fin-$((4+4))`, 'fin-8')
+  // A fresh shell can drop keys typed before its prompt is up (seen on macOS CI).
+  await expect(page.locator('.xterm-rows')).toContainText('$')
+  // The command line spells the word via $A, so only the output lines match "alpha".
+  await runInTerminal(page, 'A=al; echo ${A}pha one; echo beta two; echo ${A}pha three; echo fin-$((4+4))', 'fin-8')
 
   const bar = page.getByRole('search', { name: 'Find in terminal' })
   const input = bar.getByRole('textbox', { name: 'Find in terminal' })
