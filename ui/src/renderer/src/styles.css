@@ -461,3 +461,47 @@ body {
 .check-detail, .check-fix { color: var(--fg-muted); overflow-wrap: anywhere; }
 .check-cmd { display: flex; align-items: center; gap: 8px; margin-top: 2px; padding: 4px 6px; background: var(--bg-sidebar); border: 1px solid var(--border); border-radius: 4px; }
 .check-cmd code { flex: 1; min-width: 0; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; user-select: text; overflow-wrap: anywhere; }
+
+/* Find in terminal: floats over the top-right of the terminal without resizing it. */
+.term-find {
+  position: absolute;
+  top: 6px;
+  right: 14px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+.term-find input {
+  width: 160px;
+  min-width: 0;
+  font: inherit;
+  padding: 2px 6px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.term-find input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+.find-count { min-width: 64px; font-size: 12px; color: var(--fg-muted); white-space: nowrap; }
+.find-count.bad { color: var(--error); }
+.find-btn {
+  flex: none;
+  min-width: 24px;
+  padding: 2px 4px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.find-btn:hover { background: var(--hover); color: var(--fg); }
+.find-btn[aria-pressed='true'] { color: var(--accent); border-color: var(--accent); }

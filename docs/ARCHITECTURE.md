@@ -271,6 +271,9 @@ grouped by host. The terminal fills the rest of the window.
 - Cmd/Ctrl+Shift+J (also in the settings menu) attaches the next session whose
   Claude is waiting, across all hosts, longest-waiting first; pressing it again
   moves on and wraps around. A toast says when none (or no other) is waiting.
+- Cmd+F (macOS) / Ctrl+Shift+F finds text in the focused terminal's buffer
+  (screen plus scrollback received since attach), with case, whole-word and
+  regex toggles. Plain Ctrl+F stays with the shell.
 
 ### 5.2 New terminal dialog ([+])
 

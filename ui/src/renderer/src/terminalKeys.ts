@@ -34,3 +34,14 @@ export function clipboardAction(e: KeyLike, isMac: boolean, hasSelection: boolea
   }
   return null
 }
+
+/**
+ * The "find in terminal" shortcut: Cmd+F on macOS. Elsewhere Ctrl+Shift+F,
+ * since plain Ctrl+F is forward-char in shells and in Claude and must reach
+ * the program.
+ */
+export function isFindKey(e: KeyLike, isMac: boolean): boolean {
+  if (e.type !== 'keydown' || e.key.toLowerCase() !== 'f') return false
+  if (isMac) return e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey
+  return e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey
+}

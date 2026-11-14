@@ -13,7 +13,7 @@ and reviews, Haiku runs the mechanical steps.
 | 1 | ~~[Status of a crashed Claude (run-as)](#1-status-of-a-crashed-claude-in-run-as-sessions)~~ (done, 0.9.4) | S–M | `fix/runas-stale-status` |
 | 2 | ~~[Jump to the next waiting session](#2-jump-to-the-next-waiting-session)~~ (done, 0.9.5) | S | `feature/next-waiting` |
 | 3 | ~~[Time in state in the sidebar](#3-time-in-state-and-git-branch-in-the-sidebar)~~ (done, 0.9.6) | S | `feature/status-age` |
-| 4 | [Find in terminal](#4-find-in-terminal) | S–M | `feature/terminal-search` |
+| 4 | ~~[Find in terminal](#4-find-in-terminal)~~ (done, 0.9.7) | S–M | `feature/terminal-search` |
 | 5 | [Claude usage, phase 1: live limits](#5-claude-usage) | L | `feature/usage-live` |
 | 6 | [Colour tags for sessions](#6-colour-tags-for-sessions) | S | `feature/session-colors` |
 | 7 | [Pinned directories](#7-pinned-directories) | S | `feature/pinned-dirs` |
@@ -100,6 +100,8 @@ tests; an integration test checks a real repo directory.
 **Models.** Sonnet.
 
 ## 4. Find in terminal
+
+**Done in 0.9.7.**
 
 **What.** Ctrl/Cmd+F opens a small search bar over the focused pane, with
 previous/next, case-sensitive and regex toggles, and a match count. Esc closes

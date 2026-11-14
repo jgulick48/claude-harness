@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clipboardAction, type KeyLike } from './terminalKeys'
+import { clipboardAction, isFindKey, type KeyLike } from './terminalKeys'
 
 const key = (k: string, mods: Partial<KeyLike> = {}): KeyLike => ({
   type: 'keydown',
@@ -40,5 +40,30 @@ describe('clipboardAction (macOS)', () => {
     expect(clipboardAction(key('v', { metaKey: true }), true, false)).toBeNull()
     expect(clipboardAction(key('v', { ctrlKey: true }), true, false)).toBeNull()
     expect(clipboardAction(key('c', { ctrlKey: true }), true, true)).toBeNull()
+  })
+})
+
+describe('isFindKey', () => {
+  it('is Cmd+F on macOS only', () => {
+    expect(isFindKey(key('f', { metaKey: true }), true)).toBe(true)
+    expect(isFindKey(key('F', { metaKey: true }), true)).toBe(true)
+    expect(isFindKey(key('f', { ctrlKey: true }), true)).toBe(false)
+    expect(isFindKey(key('f', { metaKey: true, shiftKey: true }), true)).toBe(false)
+    expect(isFindKey(key('f', { metaKey: true, altKey: true }), true)).toBe(false)
+    expect(isFindKey(key('f', { metaKey: true, ctrlKey: true }), true)).toBe(false)
+    expect(isFindKey(key('f', { ctrlKey: true, shiftKey: true }), true)).toBe(false)
+  })
+  it('is Ctrl+Shift+F elsewhere, never plain Ctrl+F', () => {
+    expect(isFindKey(key('F', { ctrlKey: true, shiftKey: true }), false)).toBe(true)
+    expect(isFindKey(key('f', { ctrlKey: true, shiftKey: true }), false)).toBe(true)
+    expect(isFindKey(key('f', { ctrlKey: true }), false)).toBe(false)
+    expect(isFindKey(key('f', { ctrlKey: true, shiftKey: true, altKey: true }), false)).toBe(false)
+    expect(isFindKey(key('f', { ctrlKey: true, shiftKey: true, metaKey: true }), false)).toBe(false)
+    expect(isFindKey(key('f', { metaKey: true }), false)).toBe(false)
+    expect(isFindKey(key('g', { ctrlKey: true, shiftKey: true }), false)).toBe(false)
+  })
+  it('ignores keyup', () => {
+    expect(isFindKey({ ...key('f', { metaKey: true }), type: 'keyup' }, true)).toBe(false)
+    expect(isFindKey({ ...key('F', { ctrlKey: true, shiftKey: true }), type: 'keyup' }, false)).toBe(false)
   })
 })

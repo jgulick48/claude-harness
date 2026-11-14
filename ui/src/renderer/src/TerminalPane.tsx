@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { focusGeneration } from './focusClaims'
 import { osc52Text } from './osc52'
-import { clipboardAction } from './terminalKeys'
+import { clipboardAction, isFindKey } from './terminalKeys'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { SearchAddon } from '@xterm/addon-search'
+import { TerminalSearch } from './TerminalSearch'
 import '@xterm/xterm/css/xterm.css'
 import { useCore } from './CoreContext'
 import { useTerminalAppearance } from './appearance'
@@ -54,6 +56,10 @@ export function TerminalPane({ paneId, focused, host, sessionId, session, hostNa
   // True while the current attach is an automatic one; a failure then means the session is gone.
   const autoRef = useRef(false)
   const sessionExists = session !== undefined
+  // Find bar: the addon belongs to the current terminal; the tick re-focuses an open bar.
+  const [search, setSearch] = useState<SearchAddon | null>(null)
+  const [findOpen, setFindOpen] = useState(false)
+  const [findTick, setFindTick] = useState(0)
 
   // Reattach on its own once the host is back after "connection lost".
   const autoCount = useRef(0)
@@ -113,11 +119,16 @@ export function TerminalPane({ paneId, focused, host, sessionId, session, hostNa
       // While a program has mouse tracking on (Claude Code full-screen), drags
       // go to the program. Shift+drag selects in the terminal anyway; on macOS
       // xterm uses Option+drag for that, but only with this option.
-      macOptionClickForcesSelection: true
+      macOptionClickForcesSelection: true,
+      // Search highlights use decorations, which are a proposed API.
+      allowProposedApi: true
     })
     termRef.current = term
     const fit = new FitAddon()
     term.loadAddon(fit)
+    const searchAddon = new SearchAddon()
+    term.loadAddon(searchAddon)
+    setSearch(searchAddon)
     term.loadAddon(new WebLinksAddon(open, { hover, leave }))
     term.open(box)
     // Programs copy to the clipboard with OSC 52 (Claude Code does for its own
@@ -144,6 +155,12 @@ export function TerminalPane({ paneId, focused, host, sessionId, session, hostNa
     term.attachCustomKeyEventHandler((e) => {
       // Layout shortcuts are handled on the window; keep them out of the terminal.
       if (layoutCommand(e, isMac)) return false
+      if (isFindKey(e, isMac)) {
+        e.preventDefault()
+        setFindOpen(true)
+        setFindTick((n) => n + 1)
+        return false
+      }
       const action = clipboardAction(e, isMac, term.hasSelection())
       if (!action) return true
       e.preventDefault()
@@ -279,6 +296,8 @@ export function TerminalPane({ paneId, focused, host, sessionId, session, hostNa
       if (stream !== null) client.request('term.detach', { stream }).catch(() => {})
       refitRef.current = null
       termRef.current = null
+      setSearch(null)
+      setFindOpen(false)
       term.dispose()
     }
   }, [client, host, sessionId, attempt])
@@ -324,6 +343,15 @@ export function TerminalPane({ paneId, focused, host, sessionId, session, hostNa
       {/* A preset's background also fills the box padding, so no strip of the app color shows. */}
       <div className="term-body" style={appearance.theme?.background ? { background: appearance.theme.background } : undefined}>
         <div className="term-box" ref={boxRef} />
+        {findOpen && search && (
+          <TerminalSearch
+            search={search}
+            focusTick={findTick}
+            close={() => setFindOpen(false)}
+            onFocusTerminal={() => termRef.current?.focus()}
+            background={() => termRef.current?.options.theme?.background}
+          />
+        )}
         {(ended !== null || error !== null) && (
           <div className="term-overlay">
             <p>{error !== null ? `Could not attach: ${error}` : closedMessage(ended ?? '', hostName)}</p>
