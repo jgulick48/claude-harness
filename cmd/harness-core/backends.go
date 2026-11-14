@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/jgulick48/claude-harness/internal/api"
 	"github.com/jgulick48/claude-harness/internal/hosts"
 	"github.com/jgulick48/claude-harness/internal/recent"
 	"github.com/jgulick48/claude-harness/internal/session"
 	"github.com/jgulick48/claude-harness/internal/session/tmuxbackend"
 	"github.com/jgulick48/claude-harness/internal/sshconn"
+	"github.com/jgulick48/claude-harness/internal/usagehist"
 )
 
 // newHostManager builds the host manager served by the API: the local
@@ -28,6 +30,7 @@ import (
 //	                     /tmp/claude-harness-status-<uid>); tests point it at a temp dir
 //	HARNESS_HOSTS_FILE   saved SSH hosts (default <user config dir>/claude-harness/hosts.json)
 //	HARNESS_STATE_FILE   recent directories per host (default <user config dir>/claude-harness/state.json)
+//	HARNESS_USAGE_HISTORY_DIR  cached usage history per host (default <user config dir>/claude-harness/usage-history)
 //	HARNESS_SSH_CONFIG   ssh config file (default ~/.ssh/config)
 //	HARNESS_KNOWN_HOSTS  known_hosts file (default ~/.ssh/known_hosts)
 //
@@ -100,6 +103,18 @@ func newRecentStore(logger *slog.Logger, getenv func(string) string) session.Rec
 	st, err := recent.New(getenv("HARNESS_STATE_FILE"), logger)
 	if err != nil {
 		logger.Error("recent directories unavailable", "err", err)
+		return nil
+	}
+	return st
+}
+
+// newUsageHistory opens the usage history store (HARNESS_USAGE_HISTORY_DIR, or
+// the default directory). If it can't be set up the error is logged and
+// usage.history answers with an empty history (nil).
+func newUsageHistory(logger *slog.Logger, getenv func(string) string) api.UsageHistory {
+	st, err := usagehist.New(getenv("HARNESS_USAGE_HISTORY_DIR"), logger)
+	if err != nil {
+		logger.Error("usage history unavailable", "err", err)
 		return nil
 	}
 	return st

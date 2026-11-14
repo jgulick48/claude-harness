@@ -74,7 +74,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	addr := ln.Addr().(*net.TCPAddr)
 
 	hm := newHostManager(logger, getenv)
-	srv := &http.Server{Handler: api.NewServer(token, logger, hm, newRecentStore(logger, getenv)), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: api.NewServer(token, logger, hm, newRecentStore(logger, getenv), api.WithUsageHistory(newUsageHistory(logger, getenv))), ReadHeaderTimeout: 10 * time.Second}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(ln) }()
 

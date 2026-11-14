@@ -152,6 +152,7 @@ export function isolatedEnv(dir: string, home: string, socket: string, agentSock
     SHELL: '/bin/sh',
     HARNESS_HOSTS_FILE: join(dir, 'hosts.json'),
     HARNESS_STATE_FILE: join(dir, 'state.json'),
+    HARNESS_USAGE_HISTORY_DIR: join(dir, 'usage-history'),
     HARNESS_SSH_CONFIG: sshConfig,
     HARNESS_KNOWN_HOSTS: knownHosts,
     SSH_AUTH_SOCK: agentSock,

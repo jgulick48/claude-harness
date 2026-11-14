@@ -19,6 +19,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/jgulick48/claude-harness/internal/session"
+	"github.com/jgulick48/claude-harness/internal/usagehist"
 	"github.com/jgulick48/claude-harness/internal/version"
 )
 
@@ -29,14 +30,32 @@ type server struct {
 	logger *slog.Logger
 	hm     session.HostManager
 	recent session.RecentDirs // may be nil
+	usage  UsageHistory       // may be nil
 }
+
+// UsageHistory aggregates and caches the token usage read from a host's
+// transcripts (internal/usagehist.Store implements it).
+type UsageHistory interface {
+	Scan(ctx context.Context, host string, r session.TranscriptReader) (usagehist.Result, error)
+	Forget(host string)
+}
+
+// Option configures NewServer.
+type Option func(*server)
+
+// WithUsageHistory enables usage.history; without it the method answers with
+// an empty history.
+func WithUsageHistory(u UsageHistory) Option { return func(s *server) { s.usage = u } }
 
 // NewServer returns the handler serving /healthz and /ws, guarded by token.
 // hm owns the hosts; the API follows its changes while connections are open.
 // recent remembers directories used to create sessions; nil disables recording
 // (suggestions then carry an empty recent list).
-func NewServer(token string, logger *slog.Logger, hm session.HostManager, recent session.RecentDirs) http.Handler {
+func NewServer(token string, logger *slog.Logger, hm session.HostManager, recent session.RecentDirs, opts ...Option) http.Handler {
 	s := &server{token: token, logger: logger, hm: hm, recent: recent}
+	for _, o := range opts {
+		o(s)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /ws", s.ws)
@@ -403,7 +422,7 @@ var methods = map[string]bool{
 	"sessions.kill": true, "sessions.rename": true, "sessions.setColor": true,
 	"term.attach": true, "term.resize": true, "term.detach": true,
 	"hosts.configHosts": true, "remote.completeDir": true, "remote.suggestDirs": true,
-	"remote.pinDir": true, "remote.unpinDir": true,
+	"remote.pinDir": true, "remote.unpinDir": true, "usage.history": true,
 	"hosts.installHooks": true, "hosts.removeHooks": true,
 	"hosts.check": true,
 }
@@ -554,6 +573,8 @@ func (cn *conn) call(method string, id int64, p *params) (any, error) {
 		return cn.handlePinDir(p) // remote.go
 	case "remote.unpinDir":
 		return cn.handleUnpinDir(p) // remote.go
+	case "usage.history":
+		return cn.handleUsageHistory(ctx, b, p) // usagehistory.go
 	case "sessions.list":
 		list, err := b.List(ctx)
 		if err != nil {
@@ -643,6 +664,9 @@ func (cn *conn) hostsCall(method string, p *params) (any, error) {
 		}
 		if cn.s.recent != nil {
 			cn.s.recent.Forget(p.Host)
+		}
+		if cn.s.usage != nil {
+			cn.s.usage.Forget(p.Host)
 		}
 		return nil, nil
 	case "hosts.connect":

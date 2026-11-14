@@ -19,6 +19,11 @@
   --tag-green: #12a150;
   --tag-blue: #1e88e5;
   --tag-purple: #8e44ad;
+  --series-1: #2563eb;
+  --series-2: #d97706;
+  --series-3: #15803d;
+  --series-4: #9333ea;
+  --series-other: #6b7280;
   --sidebar-width: 280px;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   font-size: 14px;
@@ -52,6 +57,11 @@
     --tag-green: #4cd98a;
     --tag-blue: #5cb8ff;
     --tag-purple: #c08bff;
+    --series-1: #5b9cf8;
+    --series-2: #f59e0b;
+    --series-3: #4ade80;
+    --series-4: #c084fc;
+    --series-other: #9ca3af;
     color-scheme: dark;
   }
 }
@@ -77,6 +87,11 @@
   --tag-green: #4cd98a;
   --tag-blue: #5cb8ff;
   --tag-purple: #c08bff;
+  --series-1: #5b9cf8;
+  --series-2: #f59e0b;
+  --series-3: #4ade80;
+  --series-4: #c084fc;
+  --series-other: #9ca3af;
   color-scheme: dark;
 }
 
@@ -559,7 +574,7 @@ body {
 .usage-fill.warn { background: var(--warn); }
 .usage-fill.high { background: var(--error); }
 .sidebar.rail .usage-ind { display: none; }
-.usage-dialog { width: min(560px, 94vw); max-height: 88vh; overflow: auto; }
+.usage-dialog { width: min(680px, 94vw); max-height: 88vh; overflow: auto; }
 .usage-host h3 { margin: 8px 0 4px; font-size: 14px; }
 .usage-install { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; font-size: 13px; }
 .usage-limits { display: flex; flex-direction: column; gap: 8px; }
@@ -576,3 +591,22 @@ body {
   font-size: 11px; color: var(--fg-muted); font-variant-numeric: tabular-nums;
 }
 .term-usage.warn { color: var(--warn); font-weight: 600; }
+
+/* Usage history */
+.usage-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 4px 0 8px; }
+.usage-tab { font: inherit; font-size: 13px; padding: 4px 10px; color: var(--fg-muted); background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer; }
+.usage-tab:hover { color: var(--fg); }
+.usage-tab.active { color: var(--fg); border-bottom-color: var(--accent); }
+.usage-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.usage-history { display: flex; flex-direction: column; gap: 8px; }
+.usage-history-controls { display: flex; align-items: flex-end; gap: 12px; }
+.usage-history-total { margin: 0; font-size: 13px; }
+.usage-chart { margin: 0; }
+.usage-chart svg { display: block; width: 100%; height: auto; }
+.chart-grid { stroke: var(--border); stroke-width: 1; }
+.chart-axis { fill: var(--fg-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.usage-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 4px; font-size: 12px; }
+.usage-legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.usage-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.usage-history-table .usage-session { max-width: 260px; }
+.usage-num { text-align: right !important; font-variant-numeric: tabular-nums; white-space: nowrap; }

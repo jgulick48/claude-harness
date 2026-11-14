@@ -48,12 +48,14 @@ const hostsDir = mkdtempSync(join(tmpdir(), 'harness-uitest-hosts-'))
 const hostsFile = join(hostsDir, 'hosts.json')
 // Same for the state file (recent directories), so the real one is never touched.
 const stateFile = join(hostsDir, 'state.json')
+const usageHistoryDir = join(hostsDir, 'usage-history')
 afterAll(() => rmSync(hostsDir, { recursive: true, force: true }))
 const isolatedEnv = {
   HARNESS_TMUX_SOCKET: isolatedSocket,
   HARNESS_TMUX_CONFIG: '/dev/null',
   HARNESS_HOSTS_FILE: hostsFile,
-  HARNESS_STATE_FILE: stateFile
+  HARNESS_STATE_FILE: stateFile,
+  HARNESS_USAGE_HISTORY_DIR: usageHistoryDir
 }
 
 describe.skipIf(!exists)('harness-core integration', () => {
@@ -220,7 +222,7 @@ describe.skipIf(!exists || !hasTmux)('harness-core tmux scenario', () => {
 
   it('creates a session, attaches, runs a command, detaches and kills', async () => {
     const core = await startCore(corePath, {
-      env: { HARNESS_TMUX_SOCKET: socket, HARNESS_TMUX_CONFIG: '/dev/null', HARNESS_HOSTS_FILE: hostsFile, HARNESS_STATE_FILE: stateFile, SHELL: '/bin/sh' }
+      env: { HARNESS_TMUX_SOCKET: socket, HARNESS_TMUX_CONFIG: '/dev/null', HARNESS_HOSTS_FILE: hostsFile, HARNESS_STATE_FILE: stateFile, HARNESS_USAGE_HISTORY_DIR: usageHistoryDir, SHELL: '/bin/sh' }
     })
     try {
       const c = await connect(`${core.info.url}?token=${core.info.token}`)

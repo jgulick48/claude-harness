@@ -21,7 +21,7 @@ import (
 )
 
 // testHostsFile keeps tests away from the real hosts file.
-var testHostsFile, testStateFile string
+var testHostsFile, testStateFile, testUsageDir string
 
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "harness-core-test")
@@ -30,6 +30,7 @@ func TestMain(m *testing.M) {
 	}
 	testHostsFile = filepath.Join(dir, "hosts.json")
 	testStateFile = filepath.Join(dir, "state.json")
+	testUsageDir = filepath.Join(dir, "usage-history")
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
@@ -45,6 +46,9 @@ func env(m map[string]string) func(string) string {
 		}
 		if k == "HARNESS_STATE_FILE" {
 			return testStateFile
+		}
+		if k == "HARNESS_USAGE_HISTORY_DIR" {
+			return testUsageDir
 		}
 		return ""
 	}

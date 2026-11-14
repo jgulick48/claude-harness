@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { relativeTime, statusInfo } from './claudeStatus'
 import { sessionLabel, type Host, type Session } from './sessions'
 import { useNow } from './useNow'
+import { UsageHistoryView } from './UsageHistoryView'
 import {
   barPct,
   canRecordUsage,
@@ -28,6 +30,7 @@ export function UsageDialog({
   onInstall: (host: Host) => void
 }): React.JSX.Element {
   const now = useNow()
+  const [tab, setTab] = useState<'now' | 'history'>('now')
   const rows = hosts.map((host) => {
     const list = sessions[host.id] ?? []
     return { host, limits: resolveLimits(host.id, list, now), running: usageSessions(list), needsInstall: canRecordUsage(host) }
@@ -43,8 +46,23 @@ export function UsageDialog({
         onKeyDown={(e) => e.key === 'Escape' && onClose()}
       >
         <h2>Claude usage</h2>
-        {!any && <p className="help usage-empty">{EXPLANATION}</p>}
-        {shown.map(({ host, limits, running, needsInstall }) => (
+        <div className="usage-tabs" role="tablist" aria-label="Usage view">
+          {(['now', 'history'] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              role="tab"
+              aria-selected={tab === t}
+              className={`usage-tab${tab === t ? ' active' : ''}`}
+              onClick={() => setTab(t)}
+            >
+              {t === 'now' ? 'Now' : 'History'}
+            </button>
+          ))}
+        </div>
+        {tab === 'history' && <UsageHistoryView hosts={hosts} />}
+        {tab === 'now' && !any && <p className="help usage-empty">{EXPLANATION}</p>}
+        {tab === 'now' && shown.map(({ host, limits, running, needsInstall }) => (
           <section className="usage-host" key={host.id} data-testid="usage-host" aria-label={host.name}>
             <h3>{host.name}</h3>
             {needsInstall && (

@@ -129,3 +129,75 @@ test('Stop recording Claude usage restores the status line', async ({ page }) =>
   await expect(page.getByRole('menuitem', { name: 'Record Claude usage…' })).toBeVisible()
   await expect(page.getByRole('menuitem', { name: 'Stop recording Claude usage' })).toBeHidden()
 })
+
+test('the History tab charts token usage read from the transcripts', async ({ page }, info) => {
+  // Nothing to read yet: the empty state.
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('menuitem', { name: 'Claude usage…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Claude usage' })
+  await dialog.getByRole('tab', { name: 'History' }).click()
+  await expect(dialog.getByTestId('usage-history')).toContainText('No Claude transcripts found on This computer in the last 7 days.', SLOW)
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(dialog).toBeHidden()
+
+  // Fixture transcripts as Claude Code writes them: one line per content block (so a message id repeats),
+  // a user line, a synthetic model, a subagent file and a trailing partial line.
+  const home = env().core.home
+  const project = join(home, 'proj', 'alpha')
+  const asst = (id: string, model: string, ts: Date, u: [number, number, number, number]): string =>
+    JSON.stringify({
+      parentUuid: null,
+      isSidechain: false,
+      cwd: project,
+      message: {
+        model,
+        id,
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'hi' }],
+        usage: { input_tokens: u[0], cache_creation_input_tokens: u[2], cache_read_input_tokens: u[3], output_tokens: u[1] }
+      },
+      requestId: 'req_1',
+      type: 'assistant',
+      timestamp: ts.toISOString()
+    }) + '\n'
+  const now = Date.now()
+  const today = new Date(now - 60_000)
+  const yesterday = new Date(now - 26 * 3600_000)
+  const dir = join(cfgDir(), 'projects', '-proj-alpha')
+  mkdirSync(join(dir, 'sess', 'subagents'), { recursive: true })
+  const a = asst('msg_1', 'claude-opus-5-5', today, [1000, 500, 2000, 50000])
+  writeFileSync(
+    join(dir, 'sess.jsonl'),
+    a + a + '{"type":"user","message":{"role":"user","content":"hello"}}\n' +
+      asst('msg_syn', '<synthetic>', today, [9, 9, 9, 9]) +
+      asst('msg_2', 'claude-sonnet-5', yesterday, [200, 100, 0, 4000]) +
+      a.slice(0, 40)
+  )
+  writeFileSync(join(dir, 'sess', 'subagents', 'agent-x.jsonl'), asst('msg_3', 'claude-haiku-5', today, [10, 20, 30, 40]))
+
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('menuitem', { name: 'Claude usage…' }).click()
+  await dialog.getByRole('tab', { name: 'History' }).click()
+
+  const view = dialog.getByTestId('usage-history')
+  await expect(view.getByTestId('usage-chart')).toBeVisible(SLOW)
+  await expect(view.getByRole('img')).toHaveAttribute('aria-label', /last 7 days.*cache reads excluded/)
+  await expect(view.getByTestId('usage-bar')).toHaveCount(7)
+  await expect(view.getByTestId('usage-history-total')).toContainText('3.9k tokens in 3 messages')
+  const proj = view.getByTestId('usage-projects').getByRole('row').filter({ hasText: '~/proj/alpha' })
+  await expect(proj.getByRole('cell').nth(1)).toHaveText('3') // messages
+  await expect(proj.getByRole('cell').nth(2)).toHaveText('1.2k') // input
+  await expect(proj.getByRole('cell').nth(3)).toHaveText('2k') // cache write
+  await expect(proj.getByRole('cell').nth(4)).toHaveText('54k') // cache read
+  await expect(proj.getByRole('cell').nth(5)).toHaveText('620') // output
+  await expect(view.getByTestId('usage-models').getByRole('row').filter({ hasText: 'opus-5-5' })).toBeVisible()
+  await expect(view.getByTestId('usage-models')).not.toContainText('synthetic')
+  await expect(view).toContainText("cost isn't estimated")
+  await expect(view).toContainText('As of')
+  await shot(page, info, 'usage-history')
+
+  await view.getByLabel('Range').selectOption('30')
+  await expect(view.getByTestId('usage-bar')).toHaveCount(30)
+  await expect(view.getByTestId('usage-history-total')).toContainText('3 messages')
+})
