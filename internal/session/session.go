@@ -73,11 +73,29 @@ type HostKeyPrompt struct {
 	Fingerprint string `json:"fingerprint"` // "SHA256:..."
 }
 
+// Colors are the colour tags a session can carry (Session.Color). The UI maps
+// each name to a theme colour.
+var Colors = []string{"red", "orange", "yellow", "green", "blue", "purple"}
+
+// ValidColor reports whether c is "" (no tag) or one of Colors.
+func ValidColor(c string) bool {
+	if c == "" {
+		return true
+	}
+	for _, k := range Colors {
+		if k == c {
+			return true
+		}
+	}
+	return false
+}
+
 // Session is one tmux session.
 type Session struct {
 	ID          string `json:"id"`              // tmux session_id, e.g. "$3" (stable across renames)
 	Name        string `json:"name"`            // tmux session_name
 	HarnessName string `json:"harnessName"`     // user-chosen display name (@harness_name); "" if none
+	Color       string `json:"color,omitempty"` // colour tag (@harness_color), one of Colors; "" if none
 	Managed     bool   `json:"managed"`         // created by this app (@harness_managed=1)
 	RunAs       string `json:"runAs,omitempty"` // @harness_run_as: user the session switched to
 	Cwd         string `json:"cwd"`             // active pane's current path
@@ -165,6 +183,9 @@ type Backend interface {
 	Kill(ctx context.Context, id string) error
 	// Rename sets the display name (@harness_name); the tmux session name is unchanged.
 	Rename(ctx context.Context, id, name string) error
+	// SetColor sets the colour tag (@harness_color); "" clears it. A colour not
+	// in Colors wraps ErrBadRequest.
+	SetColor(ctx context.Context, id, color string) error
 	// Subscribe calls fn with the full list immediately and whenever it changes
 	// (including after Create/Kill/Rename). Returns an unsubscribe func.
 	Subscribe(fn func([]Session)) (unsubscribe func())

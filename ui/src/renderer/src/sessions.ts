@@ -117,6 +117,14 @@ export function closedMessage(reason: string, hostName: string): string {
   return reason === 'connection lost' ? `Connection to ${hostName} lost` : 'Session ended'
 }
 
+export const SESSION_COLORS = ['red', 'orange', 'yellow', 'green', 'blue', 'purple'] as const
+export type SessionColor = (typeof SESSION_COLORS)[number]
+
+/** "Red" for "red"; the colour's display name. */
+export function colorName(c: SessionColor): string {
+  return c[0].toUpperCase() + c.slice(1)
+}
+
 export interface Session {
   id: string
   name: string
@@ -134,6 +142,8 @@ export interface Session {
   runAs?: string
   /** Latest Claude usage reading; present only while Claude runs in the session. */
   usage?: SessionUsage
+  /** Colour tag chosen by the user; absent when untagged. */
+  color?: SessionColor
 }
 
 /** One rate-limit window; `resetsAt` is unix seconds. */

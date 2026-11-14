@@ -261,7 +261,7 @@ var listFormat = strings.Join([]string{
 	"#{session_id}", "#{session_name}", "#{@harness_name}", "#{@harness_managed}",
 	"#{pane_current_path}", "#{session_windows}", "#{session_attached}", "#{session_created}",
 	"#{@claude_status}", "#{@claude_status_at}", "#{pane_current_command}", "#{@harness_run_as}",
-	"#{@harness_status_file}",
+	"#{@harness_status_file}", "#{@harness_color}",
 }, fieldSep)
 
 // shellCommands are pane commands that mean "no Claude here".
@@ -330,6 +330,9 @@ func (b *Backend) List(ctx context.Context) ([]session.Session, error) {
 		sf := ""
 		if len(f) >= 13 {
 			sf = f[12]
+		}
+		if len(f) >= 14 && session.ValidColor(f[13]) {
+			sess.Color = f[13]
 		}
 		list = append(list, sess)
 		statusFiles = append(statusFiles, sf)
@@ -676,6 +679,25 @@ func (b *Backend) Rename(ctx context.Context, id, name string) error {
 	args := []string{"set-option", "-t", id, "@harness_name", name}
 	if name == "" {
 		args = []string{"set-option", "-u", "-q", "-t", id, "@harness_name"}
+	}
+	if _, err := b.run.Output(ctx, args...); err != nil {
+		return b.mapError(err, id)
+	}
+	b.kick()
+	return nil
+}
+
+// SetColor sets the colour tag (@harness_color); "" clears it.
+func (b *Backend) SetColor(ctx context.Context, id, color string) error {
+	if !session.ValidColor(color) {
+		return fmt.Errorf("%w: unknown color %q", session.ErrBadRequest, color)
+	}
+	if err := b.gate(); err != nil {
+		return err
+	}
+	args := []string{"set-option", "-t", id, "@harness_color", color}
+	if color == "" {
+		args = []string{"set-option", "-u", "-q", "-t", id, "@harness_color"}
 	}
 	if _, err := b.run.Output(ctx, args...); err != nil {
 		return b.mapError(err, id)

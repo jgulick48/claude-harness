@@ -217,6 +217,12 @@ func TestSSHLifecycle(t *testing.T) {
 	if list, _ = b.List(ctx); list[0].HarnessName != "Renamed" {
 		t.Errorf("%+v", list[0])
 	}
+	if err := b.SetColor(ctx, s.ID, "purple"); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ = b.List(ctx); list[0].Color != "purple" {
+		t.Errorf("color over ssh: %+v", list[0])
+	}
 
 	term, err := b.Attach(ctx, s.ID, 100, 30)
 	if err != nil {

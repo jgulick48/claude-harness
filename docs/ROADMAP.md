@@ -15,7 +15,7 @@ and reviews, Haiku runs the mechanical steps.
 | 3 | ~~[Time in state in the sidebar](#3-time-in-state-and-git-branch-in-the-sidebar)~~ (done, 0.9.6) | S | `feature/status-age` |
 | 4 | ~~[Find in terminal](#4-find-in-terminal)~~ (done, 0.9.7) | S–M | `feature/terminal-search` |
 | 5 | ~~[Claude usage, phase 1: live limits](#5-claude-usage)~~ (done, 0.10.0) | L | `feature/usage-live` |
-| 6 | [Colour tags for sessions](#6-colour-tags-for-sessions) | S | `feature/session-colors` |
+| 6 | ~~[Colour tags for sessions](#6-colour-tags-for-sessions)~~ (done, 0.11.0) | S | `feature/session-colors` |
 | 7 | [Pinned directories](#7-pinned-directories) | S | `feature/pinned-dirs` |
 | 8 | [Git branch in the sidebar](#3-time-in-state-and-git-branch-in-the-sidebar) | M | `feature/session-branch` |
 | 9 | [Claude usage, phase 2: history](#5-claude-usage) | M–L | `feature/usage-history` |
@@ -203,6 +203,9 @@ implements; Haiku runs the check passes.
   status line reported it.
 
 ## 6. Colour tags for sessions
+
+**Done in 0.11.0.** Six colours (red, orange, yellow, green, blue, purple);
+the filter matches a colour by name prefix.
 
 A colour dot on the row and in the rail, picked from the row's context menu
 from about 6 theme-aware colours. It's stored as the tmux session option

@@ -46,11 +46,14 @@ import {
   hostStatusText,
   reconnectText,
   runAsSuffix,
+  SESSION_COLORS,
+  colorName,
   sessionLabel,
   trustKeyParams,
   truncateMiddle,
   type Host,
-  type Session
+  type Session,
+  type SessionColor
 } from './sessions'
 
 interface MenuState {
@@ -245,10 +248,25 @@ function SettingsMenu({
   )
 }
 
+/** Small round colour tag; nothing when the session is untagged. */
+function ColorDot({ color, title }: { color?: SessionColor; title?: boolean }): React.JSX.Element | null {
+  if (!color) return null
+  return (
+    <span
+      className="color-dot"
+      data-testid="session-color"
+      data-color={color}
+      title={title ? `Colour: ${colorName(color)}` : undefined}
+      aria-hidden="true"
+    />
+  )
+}
+
 function ContextMenu({
   menu,
   open,
   onRename,
+  onColor,
   onDisconnect,
   onKill,
   onSplit,
@@ -260,6 +278,8 @@ function ContextMenu({
   open: boolean
   onSplit: (direction: 'right' | 'down') => void
   onRename: () => void
+  /** '' clears the tag. */
+  onColor: (color: SessionColor | '') => void
   onDisconnect: () => void
   onKill: () => void
   onChange: (m: MenuState) => void
@@ -290,6 +310,30 @@ function ContextMenu({
           <button className="ctx-item" role="menuitem" onClick={onRename}>
             Rename…
           </button>
+          <div className="ctx-colors" role="group" aria-label="Colour">
+            {SESSION_COLORS.map((c) => (
+              <button
+                key={c}
+                className={`ctx-swatch${menu.session.color === c ? ' selected' : ''}`}
+                role="menuitemradio"
+                aria-checked={menu.session.color === c}
+                aria-label={`Colour: ${colorName(c)}`}
+                title={colorName(c)}
+                data-testid={`color-${c}`}
+                data-color={c}
+                onClick={() => onColor(c)}
+              />
+            ))}
+            <button
+              className={`ctx-swatch none${menu.session.color ? '' : ' selected'}`}
+              role="menuitemradio"
+              aria-checked={!menu.session.color}
+              aria-label="No colour"
+              title="No colour"
+              data-testid="color-none"
+              onClick={() => onColor('')}
+            />
+          </div>
           {open && (
             <button
               className="ctx-item"
@@ -382,7 +426,10 @@ function RailView({
               const info = statusInfo(s)
               const isActive = active?.host === host.id && active.session === s.id
               const isOpen = !isActive && visible.has(`${host.id}/${s.id}`)
-              const text = (info ? `${label} — ${statusText(s, now)}` : label) + runAsSuffix(s)
+              const text =
+                (info ? `${label} — ${statusText(s, now)}` : label) +
+                runAsSuffix(s) +
+                (s.color ? ` [${colorName(s.color)}]` : '')
               return (
                 <button
                   key={s.id}
@@ -401,6 +448,7 @@ function RailView({
                   ) : (
                     <span className="rail-dot" aria-hidden="true" />
                   )}
+                  <ColorDot color={s.color} />
                 </button>
               )
             })}
@@ -466,7 +514,7 @@ export function Sidebar(): React.JSX.Element {
       ? orderSessions(state.sessions[host.id] ?? [], attentionSort).flatMap((s) => {
           const label = sessionLabel(s)
           const path = displayPath(s.cwd, host.home ?? '')
-          const m = matchCandidate(query, { label, path, host: host.name })
+          const m = matchCandidate(query, { label, path, host: host.name, color: s.color })
           return m ? [{ s, label, path, labelIndices: m.labelIndices, score: m.score }] : []
         })
       : []
@@ -912,6 +960,7 @@ export function Sidebar(): React.JSX.Element {
                             )}
                           </span>
                         )}
+                        <ColorDot color={s.color} title />
                         {!s.managed && <span className="tag">external</span>}
                         {s.runAs && (
                           <span className="tag" title={`Runs as ${s.runAs}`}>
@@ -968,7 +1017,9 @@ export function Sidebar(): React.JSX.Element {
       <footer className={statusIsError ? 'status-line error' : 'status-line'}>{status}</footer>
       {hostMenu && (
         <HostMenu
-          menu={hostMenu}
+          // The host's live state, not the copy taken when the menu opened:
+          // e.g. claudeUsage changes a moment after "Stop recording".
+          menu={{ ...hostMenu, host: state.hosts.find((h) => h.id === hostMenu.host.id) ?? hostMenu.host }}
           onChange={setHostMenu}
           onClose={() => setHostMenu(null)}
           onReconnect={() => {
@@ -1065,6 +1116,12 @@ export function Sidebar(): React.JSX.Element {
           onRename={() => {
             setRenaming({ host: menu.host.id, id: menu.session.id })
             setMenu(null)
+          }}
+          onColor={(color) => {
+            const m = menu
+            setMenu(null)
+            if (client)
+              act(client.request('sessions.setColor', { host: m.host.id, session: m.session.id, color }))
           }}
           onSplit={(direction) => {
             const m = menu

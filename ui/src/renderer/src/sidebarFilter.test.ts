@@ -22,6 +22,24 @@ describe('fuzzyMatch', () => {
   })
 })
 
+describe('matchCandidate colour', () => {
+  const c = { label: 'api', path: '~/work/api', host: 'devbox', color: 'green' }
+  it('matches the colour name by prefix', () => {
+    expect(matchCandidate('green', c)).not.toBeNull()
+    expect(matchCandidate('gre', c)).not.toBeNull()
+    expect(matchCandidate('red', c)).toBeNull()
+  })
+  it('does not fuzzy-match colour letters or match untagged sessions', () => {
+    expect(matchCandidate('gn', c)).toBeNull()
+    expect(matchCandidate('green', { ...c, color: undefined })).toBeNull()
+  })
+  it('combines with other tokens and leaves label highlights alone', () => {
+    expect(matchCandidate('green api', c)?.labelIndices).toEqual([0, 1, 2])
+    expect(matchCandidate('green nope', c)).toBeNull()
+    expect(matchCandidate('green', c)?.labelIndices).toEqual([])
+  })
+})
+
 describe('matchCandidate', () => {
   const c = { label: 'api-refactor', path: '~/work/api', host: 'devbox' }
   it('matches everything for an empty or blank query', () => {

@@ -394,12 +394,13 @@ type params struct {
 	Stream      json.RawMessage `json:"stream"`
 	Prefix      string          `json:"prefix"`
 	Usage       json.RawMessage `json:"usage"`
+	Color       string          `json:"color"`
 }
 
 var methods = map[string]bool{
 	"hosts.list": true, "hosts.add": true, "hosts.remove": true, "hosts.connect": true,
 	"hosts.trustKey": true, "sessions.list": true, "sessions.create": true,
-	"sessions.kill": true, "sessions.rename": true,
+	"sessions.kill": true, "sessions.rename": true, "sessions.setColor": true,
 	"term.attach": true, "term.resize": true, "term.detach": true,
 	"hosts.configHosts": true, "remote.completeDir": true, "remote.suggestDirs": true,
 	"hosts.installHooks": true, "hosts.removeHooks": true,
@@ -576,6 +577,11 @@ func (cn *conn) call(method string, id int64, p *params) (any, error) {
 			return nil, err
 		}
 		return nil, b.Rename(ctx, p.Session, p.Name)
+	case "sessions.setColor":
+		if err := need("session", p.Session); err != nil {
+			return nil, err
+		}
+		return nil, b.SetColor(ctx, p.Session, p.Color)
 	case "term.attach":
 		if err := need("session", p.Session); err != nil {
 			return nil, err

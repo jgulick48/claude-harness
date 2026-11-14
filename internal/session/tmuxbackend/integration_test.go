@@ -200,6 +200,32 @@ func TestRenameKill(t *testing.T) {
 		t.Errorf("rename unknown: %v", err)
 	}
 
+	if err := b.SetColor(ctx, s.ID, "green"); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ = b.List(ctx); list[0].Color != "green" {
+		t.Errorf("color: %+v", list[0])
+	}
+	if err := b.SetColor(ctx, s.ID, "teal"); !errors.Is(err, session.ErrBadRequest) {
+		t.Errorf("unknown color: %v", err)
+	}
+	if err := b.SetColor(ctx, s.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ = b.List(ctx); list[0].Color != "" {
+		t.Errorf("after clearing color: %+v", list[0])
+	}
+	if err := b.SetColor(ctx, "$999", "red"); !errors.Is(err, session.ErrNotFound) {
+		t.Errorf("color unknown session: %v", err)
+	}
+	// A value set by hand outside the known names is not reported.
+	if _, err := b.run.Output(ctx, "set-option", "-t", s.ID, "@harness_color", "#ff0000"); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ = b.List(ctx); list[0].Color != "" {
+		t.Errorf("hand-set color: %+v", list[0])
+	}
+
 	if err := b.Kill(ctx, s.ID); err != nil {
 		t.Fatal(err)
 	}

@@ -129,6 +129,14 @@ func (h *sshHost) Rename(ctx context.Context, id, name string) error {
 	return b.Rename(ctx, id, name)
 }
 
+func (h *sshHost) SetColor(ctx context.Context, id, color string) error {
+	b, err := h.current()
+	if err != nil {
+		return err
+	}
+	return b.SetColor(ctx, id, color)
+}
+
 func (h *sshHost) Attach(ctx context.Context, id string, cols, rows int) (session.Terminal, error) {
 	b, err := h.current()
 	if err != nil {
