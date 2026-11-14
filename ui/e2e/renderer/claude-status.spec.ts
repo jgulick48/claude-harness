@@ -49,7 +49,7 @@ test('the row shows how long Claude has been in its state', async ({ page }) => 
   const row = local(page).locator('[data-row]').filter({ hasText: 'age-test' })
   const now = Math.floor(Date.now() / 1000)
 
-  tmux('set-option', '-t', 'age', '@claude_status_at', String(now - 12 * 60 - 5))
+  tmux('set-option', '-t', 'age', '@claude_status_at', String(now - 12 * 60 - 30))
   tmux('set-option', '-t', 'age', '@claude_status', 'waiting')
   await expect(row.locator('.status')).toHaveText(/Waiting\s+12m/)
 
@@ -59,7 +59,7 @@ test('the row shows how long Claude has been in its state', async ({ page }) => 
   await expect(row.locator('.status')).toHaveText(/^\W*Working$/)
 
   // The rail tooltip carries the age too.
-  tmux('set-option', '-t', 'age', '@claude_status_at', String(now - 3 * 3600))
+  tmux('set-option', '-t', 'age', '@claude_status_at', String(now - 3 * 3600 - 60))
   tmux('set-option', '-t', 'age', '@claude_status', 'idle')
   await expect(row.locator('.status')).toHaveText(/Idle\s+3h/)
   await page.keyboard.press(keys.rail)

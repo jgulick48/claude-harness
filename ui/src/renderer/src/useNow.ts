@@ -4,16 +4,15 @@ import { useSyncExternalStore } from 'react'
 
 export const NOW_TICK_MS = 30_000
 
-let now = Date.now()
+let tick = 0
 let timer: ReturnType<typeof setInterval> | null = null
 const listeners = new Set<() => void>()
 
 function subscribe(fn: () => void): () => void {
   listeners.add(fn)
   if (!timer) {
-    now = Date.now()
     timer = setInterval(() => {
-      now = Date.now()
+      tick++
       for (const l of listeners) l()
     }, NOW_TICK_MS)
   }
@@ -26,7 +25,12 @@ function subscribe(fn: () => void): () => void {
   }
 }
 
-/** The current time in ms, updated every NOW_TICK_MS. */
+/**
+ * The current time in ms. The component re-renders at least every
+ * NOW_TICK_MS, and every render reads the clock afresh, so a status that just
+ * changed is never measured against a stale time.
+ */
 export function useNow(): number {
-  return useSyncExternalStore(subscribe, () => now)
+  useSyncExternalStore(subscribe, () => tick)
+  return Date.now()
 }
