@@ -233,6 +233,7 @@ describe.skipIf(!exists || !hasTmux)('harness-core tmux scenario', () => {
         expect(Array.isArray(before.recent)).toBe(true)
         expect(Array.isArray(before.repos)).toBe(true)
         expect(before.recent).toEqual([])
+        expect(before.pinned).toEqual([])
 
         const created = await c.request('sessions.create', {
           host: 'local',
@@ -259,6 +260,18 @@ describe.skipIf(!exists || !hasTmux)('harness-core tmux scenario', () => {
         // A successful create records its dir in the host's recent list.
         const after = await c.request('remote.suggestDirs', { host: 'local' })
         expect(after.recent).toContain(tmpdir())
+
+        // Pinning moves a dir out of recent; unpinning returns it to the front.
+        const pinned = await c.request('remote.pinDir', { host: 'local', dir: tmpdir() })
+        expect(pinned.pinned).toEqual([tmpdir()])
+        expect(pinned.recent).not.toContain(tmpdir())
+        const afterPin = await c.request('remote.suggestDirs', { host: 'local' })
+        expect(afterPin.pinned).toEqual([tmpdir()])
+        expect(afterPin.recent).not.toContain(tmpdir())
+        await expect(c.request('remote.pinDir', { host: 'local', dir: '' })).rejects.toMatchObject({ code: 'bad_request' })
+        const unpinned = await c.request('remote.unpinDir', { host: 'local', dir: tmpdir() })
+        expect(unpinned.pinned).toEqual([])
+        expect(unpinned.recent[0]).toBe(tmpdir())
 
         await c.request('term.detach', { stream })
         await c.request('sessions.kill', { host: 'local', session: created.id })

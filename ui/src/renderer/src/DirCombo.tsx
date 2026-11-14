@@ -7,6 +7,7 @@ import {
   initialCombo,
   isVisible,
   suggestItems,
+  type Suggestions,
   wantsSuggestions,
   type DirEntry
 } from './dirComboState'
@@ -25,7 +26,7 @@ export function DirCombo({ id, host, value, onChange }: Props): React.JSX.Elemen
   const { client } = useCore()
   const [s, dispatch] = useReducer(comboReducer, initialCombo)
   const seq = useRef(0)
-  const suggestCache = useRef(new Map<string, DirEntry[]>())
+  const suggestCache = useRef(new Map<string, Suggestions>())
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -35,16 +36,15 @@ export function DirCombo({ id, host, value, onChange }: Props): React.JSX.Elemen
     const suggest = wantsSuggestions(value)
     const cached = suggest ? suggestCache.current.get(host) : undefined
     if (cached) {
-      dispatch({ type: 'results', seq: mySeq, items: cached })
+      dispatch({ type: 'results', seq: mySeq, items: suggestItems(cached) })
       return
     }
     const timer = setTimeout(
       () => {
         const req = suggest
-          ? client.request<{ recent?: string[]; repos?: string[] }>('remote.suggestDirs', { host }).then((r) => {
-              const items = suggestItems(r ?? {})
-              suggestCache.current.set(host, items)
-              return items
+          ? client.request<Suggestions>('remote.suggestDirs', { host }).then((r) => {
+              suggestCache.current.set(host, r ?? {})
+              return suggestItems(r ?? {})
             })
           : client
               .request<Array<{ path: string; gitRepo?: boolean }>>('remote.completeDir', { host, prefix: value })
@@ -66,6 +66,21 @@ export function DirCombo({ id, host, value, onChange }: Props): React.JSX.Elemen
     dispatch({ type: 'accepted' })
     onChange(path)
     inputRef.current?.focus()
+  }
+
+  const togglePin = (it: DirEntry): void => {
+    if (!client) return
+    const mySeq = ++seq.current
+    dispatch({ type: 'request', seq: mySeq })
+    client
+      .request<Suggestions>(it.pinned ? 'remote.unpinDir' : 'remote.pinDir', { host, dir: it.path })
+      .then((r) => {
+        // pin/unpin return pinned and recent; repositories are unchanged.
+        const next = { ...r, repos: suggestCache.current.get(host)?.repos }
+        suggestCache.current.set(host, next)
+        dispatch({ type: 'results', seq: mySeq, items: suggestItems(next) })
+      })
+      .catch((e: Error) => dispatch({ type: 'failed', seq: mySeq, message: e.message }))
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
@@ -130,6 +145,25 @@ export function DirCombo({ id, host, value, onChange }: Props): React.JSX.Elemen
                 >
                   <span className="combo-path">{it.path}</span>
                   {it.gitRepo && <span className="badge">git</span>}
+                  {it.group && (
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      className={`combo-pin${it.pinned ? ' pinned' : ''}`}
+                      aria-label={`${it.pinned ? 'Unpin' : 'Pin'} ${it.path}`}
+                      title={`${it.pinned ? 'Unpin' : 'Pin'} ${it.path}`}
+                      aria-pressed={!!it.pinned}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        togglePin(it)
+                      }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill={it.pinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true">
+                        <path d="M10 2l4 4-2 1-2.5 2.5.5 3-1 1-3-3-4 4M6 4.5l-1 1-1-1 1-1z" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
               </li>
             )

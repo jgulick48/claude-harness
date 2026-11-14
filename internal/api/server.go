@@ -403,6 +403,7 @@ var methods = map[string]bool{
 	"sessions.kill": true, "sessions.rename": true, "sessions.setColor": true,
 	"term.attach": true, "term.resize": true, "term.detach": true,
 	"hosts.configHosts": true, "remote.completeDir": true, "remote.suggestDirs": true,
+	"remote.pinDir": true, "remote.unpinDir": true,
 	"hosts.installHooks": true, "hosts.removeHooks": true,
 	"hosts.check": true,
 }
@@ -549,6 +550,10 @@ func (cn *conn) call(method string, id int64, p *params) (any, error) {
 		return cn.handleCompleteDir(ctx, b, p) // remote.go
 	case "remote.suggestDirs":
 		return cn.handleSuggestDirs(ctx, b, p) // remote.go
+	case "remote.pinDir":
+		return cn.handlePinDir(p) // remote.go
+	case "remote.unpinDir":
+		return cn.handleUnpinDir(p) // remote.go
 	case "sessions.list":
 		list, err := b.List(ctx)
 		if err != nil {

@@ -281,6 +281,14 @@ type RecentDirs interface {
 	List(host string) []string
 	// Forget drops a host's history (e.g. when the host is removed).
 	Forget(host string)
+	// Pin keeps dir at the top of host's suggestions, outside the recent
+	// limit (in pinning order, at most 50; the error says when the limit is hit).
+	// Pinned directories are not in List.
+	Pin(host, dir string) error
+	// Unpin returns a pinned dir to the front of host's recent list.
+	Unpin(host, dir string)
+	// Pinned lists host's pinned directories in pinning order.
+	Pinned(host string) []string
 }
 
 // HookInstaller is an optional Backend capability: installing the Claude Code

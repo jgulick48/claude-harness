@@ -3,7 +3,9 @@
 export interface DirEntry {
   path: string
   gitRepo?: boolean
-  group?: 'Recent' | 'Repositories'
+  group?: 'Pinned' | 'Recent' | 'Repositories'
+  /** Suggestion rows only: the directory is pinned. */
+  pinned?: boolean
 }
 
 export interface ComboState {
@@ -102,12 +104,27 @@ export function wantsSuggestions(value: string): boolean {
 
 const norm = (p: string): string => (p.length > 1 ? p.replace(/\/+$/, '') : p)
 
-/** Recent first, then repositories not already listed as recent. */
-export function suggestItems(r: { recent?: string[]; repos?: string[] }): DirEntry[] {
-  const recent = r.recent ?? []
-  const seen = new Set(recent.map(norm))
-  const repos = (r.repos ?? []).filter((p) => !seen.has(norm(p)))
+/** What remote.suggestDirs returns (and remote.pinDir/unpinDir, minus repos). */
+export interface Suggestions {
+  pinned?: string[]
+  recent?: string[]
+  repos?: string[]
+}
+
+/** Pinned first, then recent, then repositories; each path is listed once. */
+export function suggestItems(r: Suggestions): DirEntry[] {
+  const seen = new Set<string>()
+  const fresh = (p: string): boolean => {
+    const k = norm(p)
+    if (seen.has(k)) return false
+    seen.add(k)
+    return true
+  }
+  const pinned = (r.pinned ?? []).filter(fresh)
+  const recent = (r.recent ?? []).filter(fresh)
+  const repos = (r.repos ?? []).filter(fresh)
   return [
+    ...pinned.map((path): DirEntry => ({ path, group: 'Pinned', pinned: true })),
     ...recent.map((path): DirEntry => ({ path, group: 'Recent' })),
     ...repos.map((path): DirEntry => ({ path, gitRepo: true, group: 'Repositories' }))
   ]

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -15,9 +16,17 @@ import (
 // MaxPerHost is the number of directories remembered per host.
 const MaxPerHost = 10
 
+// MaxPinnedPerHost is the number of pinned directories allowed per host.
+const MaxPinnedPerHost = 50
+
+// ErrTooManyPinned is returned by Pin when a host already has MaxPinnedPerHost
+// pinned directories.
+var ErrTooManyPinned = errors.New("too many pinned directories")
+
 type fileFormat struct {
 	Version    int                 `json:"version"`
 	RecentDirs map[string][]string `json:"recentDirs"`
+	PinnedDirs map[string][]string `json:"pinnedDirs,omitempty"`
 }
 
 // Store implements session.RecentDirs, persisted as JSON.
@@ -26,8 +35,9 @@ type Store struct {
 	log  *slog.Logger
 
 	mu      sync.Mutex
-	dirs    map[string][]string
-	corrupt bool // the file on disk is unreadable and has not been moved aside yet
+	dirs    map[string][]string // recent, most recent first
+	pinned  map[string][]string // in pinning order
+	corrupt bool                // the file on disk is unreadable and has not been moved aside yet
 }
 
 // DefaultPath is <user config dir>/claude-harness/state.json.
@@ -53,7 +63,7 @@ func New(path string, logger *slog.Logger) (*Store, error) {
 		}
 		path = p
 	}
-	s := &Store{path: path, log: logger, dirs: map[string][]string{}}
+	s := &Store{path: path, log: logger, dirs: map[string][]string{}, pinned: map[string][]string{}}
 	data, err := os.ReadFile(path)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
@@ -61,18 +71,29 @@ func New(path string, logger *slog.Logger) (*Store, error) {
 		return nil, err
 	default:
 		var f fileFormat
-		if err := json.Unmarshal(data, &f); err != nil || f.Version != 1 {
+		if err := json.Unmarshal(data, &f); err != nil || (f.Version != 1 && f.Version != 2) {
 			if err == nil {
 				err = errors.New("unsupported version")
 			}
 			logger.Error("state file is corrupt; starting empty", "path", path, "err", err)
 			s.corrupt = true
 		} else {
+			for h, l := range f.PinnedDirs {
+				if len(l) > MaxPinnedPerHost {
+					l = l[:MaxPinnedPerHost]
+				}
+				if len(l) > 0 {
+					s.pinned[h] = l
+				}
+			}
 			for h, l := range f.RecentDirs {
+				l = without(l, s.pinned[h])
 				if len(l) > MaxPerHost {
 					l = l[:MaxPerHost]
 				}
-				s.dirs[h] = l
+				if len(l) > 0 {
+					s.dirs[h] = l
+				}
 			}
 		}
 	}
@@ -91,11 +112,26 @@ func normalize(dir string) string {
 	return dir
 }
 
-// Add records dir as the most recent directory of host.
+// without returns l minus every entry of drop, as a new slice.
+func without(l, drop []string) []string {
+	out := make([]string, 0, len(l))
+	for _, d := range l {
+		if !slices.Contains(drop, d) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// Add records dir as the most recent directory of host. A pinned directory
+// stays pinned and is not added to the recent list.
 func (s *Store) Add(host, dir string) {
 	dir = normalize(dir)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if slices.Contains(s.pinned[host], dir) {
+		return
+	}
 	old := s.dirs[host]
 	l := make([]string, 0, len(old)+1)
 	l = append(l, dir)
@@ -118,14 +154,69 @@ func (s *Store) List(host string) []string {
 	return append([]string{}, s.dirs[host]...)
 }
 
-// Forget drops host's history.
+// Pinned returns host's pinned directories in the order they were pinned.
+func (s *Store) Pinned(host string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string{}, s.pinned[host]...)
+}
+
+// Pin pins dir for host, removing it from the recent list. Pinning an already
+// pinned directory is a no-op that keeps its position. It fails with
+// ErrTooManyPinned when host already has MaxPinnedPerHost pinned directories.
+func (s *Store) Pin(host, dir string) error {
+	dir = normalize(dir)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if slices.Contains(s.pinned[host], dir) {
+		return nil
+	}
+	if len(s.pinned[host]) >= MaxPinnedPerHost {
+		return ErrTooManyPinned
+	}
+	s.pinned[host] = append(slices.Clone(s.pinned[host]), dir)
+	if l := without(s.dirs[host], []string{dir}); len(l) > 0 {
+		s.dirs[host] = l
+	} else {
+		delete(s.dirs, host)
+	}
+	s.saveLocked()
+	return nil
+}
+
+// Unpin unpins dir for host and makes it the most recent directory. It does
+// nothing if dir is not pinned.
+func (s *Store) Unpin(host, dir string) {
+	dir = normalize(dir)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !slices.Contains(s.pinned[host], dir) {
+		return
+	}
+	if l := without(s.pinned[host], []string{dir}); len(l) > 0 {
+		s.pinned[host] = l
+	} else {
+		delete(s.pinned, host)
+	}
+	l := append([]string{dir}, without(s.dirs[host], []string{dir})...)
+	if len(l) > MaxPerHost {
+		l = l[:MaxPerHost]
+	}
+	s.dirs[host] = l
+	s.saveLocked()
+}
+
+// Forget drops host's history and pinned directories.
 func (s *Store) Forget(host string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.dirs[host]; !ok {
+	_, r := s.dirs[host]
+	_, p := s.pinned[host]
+	if !r && !p {
 		return
 	}
 	delete(s.dirs, host)
+	delete(s.pinned, host)
 	s.saveLocked()
 }
 
@@ -140,7 +231,7 @@ func (s *Store) writeLocked() error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(fileFormat{Version: 1, RecentDirs: s.dirs}, "", "  ")
+	data, err := json.MarshalIndent(fileFormat{Version: 2, RecentDirs: s.dirs, PinnedDirs: s.pinned}, "", "  ")
 	if err != nil {
 		return err
 	}

@@ -74,6 +74,42 @@ test('suggestions list recent and repositories', async ({ page }) => {
   await expect(dialog).toBeHidden()
 })
 
+test('pinning a suggestion moves it to Pinned and survives reopening the dialog', async ({ page }) => {
+  const open = async () => {
+    await page.getByRole('button', { name: 'New terminal', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: 'New terminal' })
+    await dialog.getByRole('combobox', { name: 'Directory' }).fill('')
+    return { dialog, list: dialog.getByRole('listbox', { name: 'Directory suggestions' }) }
+  }
+  const close = async (dialog: import('@playwright/test').Locator) => {
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeHidden()
+  }
+  const alpha = (list: import('@playwright/test').Locator) => list.getByRole('option').filter({ hasText: '~/proj/alpha' })
+
+  let { dialog, list } = await open()
+  // alpha-work was created in ~/proj/alpha, so it is under Recent.
+  await expect(list.getByText('Pinned', { exact: true })).toHaveCount(0)
+  await alpha(list).getByRole('button', { name: 'Pin ~/proj/alpha' }).click()
+  // The list stays open and the row moves to a Pinned group at the top.
+  await expect(list).toBeVisible()
+  await expect(list.getByText('Pinned', { exact: true })).toBeVisible()
+  await expect(list.getByRole('option').first()).toContainText('~/proj/alpha')
+  await expect(alpha(list).getByRole('button', { name: 'Unpin ~/proj/alpha' })).toBeVisible()
+  await expect(dialog.getByRole('combobox', { name: 'Directory' })).toHaveValue('')
+  await close(dialog)
+
+  ;({ dialog, list } = await open())
+  await expect(list.getByText('Pinned', { exact: true })).toBeVisible()
+  await expect(list.getByRole('option').first()).toContainText('~/proj/alpha')
+  await alpha(list).getByRole('button', { name: 'Unpin ~/proj/alpha' }).click()
+  await expect(list.getByText('Pinned', { exact: true })).toHaveCount(0)
+  await expect(list.getByText('Recent', { exact: true })).toBeVisible()
+  await expect(alpha(list).getByRole('button', { name: 'Pin ~/proj/alpha' })).toBeVisible()
+  await close(dialog)
+})
+
 test('disconnect closes the pane but the session keeps running', async ({ page }) => {
   const row = page.getByRole('button', { name: /alpha-work/ })
   await row.click()
