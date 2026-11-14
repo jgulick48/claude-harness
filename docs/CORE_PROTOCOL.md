@@ -306,11 +306,14 @@ Used by the new-terminal dialog.
 | Method | Params | Result |
 |---|---|---|
 | `remote.completeDir` | `host`, `prefix` (`""`, `~`, `~/…` or absolute) | `[{"path":"~/src/app/","gitRepo":true}]`. Directories matching `prefix`, in the same form as the prefix, each ending in `/`, sorted, at most 100. A prefix ending in `/` lists that directory's children. Hidden directories appear only when the typed name starts with `.`. A missing directory gives `[]`. |
-| `remote.suggestDirs` | `host` | `{"recent":["~/work/api"],"repos":["~/src/app/"]}`. `recent` holds the directories used to create sessions on this host, most recent first, at most 10, kept across restarts. `repos` holds git repositories found under home, up to 3 levels deep, at most 50. The search takes at most ~3 s; when it times out, `repos` is partial. |
+| `remote.suggestDirs` | `host` | `{"pinned":["~/work/web"],"recent":["~/work/api"],"repos":["~/src/app/"]}`. `pinned` holds the directories pinned on this host, in the order they were pinned, at most 50, not counted in `recent`. `recent` holds the directories used to create sessions on this host, most recent first, at most 10, kept across restarts. `repos` holds git repositories found under home, up to 3 levels deep, at most 50. The search takes at most ~3 s; when it times out, `repos` is partial. |
+| `remote.pinDir` | `host`, `dir` | `{"pinned":[…],"recent":[…]}`. Pins `dir` (normalized like recent entries, trailing `/` dropped) and removes it from `recent`. Pinning an already pinned directory changes nothing. An empty `dir`, or a 51st pin, gives `bad_request`. `unavailable` if the core keeps no directory history. |
+| `remote.unpinDir` | `host`, `dir` | `{"pinned":[…],"recent":[…]}`. Unpins `dir` and puts it at the front of `recent` (which stays capped at 10). Does nothing if `dir` is not pinned. An empty `dir` gives `bad_request`. |
 
 A host without filesystem browsing gives `[]` / `{"recent":[…],"repos":[]}`.
 A successful `sessions.create` records its `dir` (as given; `""` is recorded as
-`~`) in that host's recent list. Removing a host forgets its list.
+`~`) in that host's recent list, unless `dir` is pinned, in which case the
+lists do not change. Removing a host forgets both its recent and pinned lists.
 
 ## 6. Terminals
 

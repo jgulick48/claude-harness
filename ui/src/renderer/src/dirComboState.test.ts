@@ -95,6 +95,19 @@ describe('suggestions', () => {
       { path: '~/src/app/', gitRepo: true, group: 'Repositories' }
     ])
   })
+  it('lists Pinned first, without repeating them under Recent or Repositories', () => {
+    const items = suggestItems({
+      pinned: ['~/src/app', '~/old'],
+      recent: ['~/work/api', '~/src/app/'],
+      repos: ['~/src/app/', '~/work/api', '~/src/lib/']
+    })
+    expect(items).toEqual([
+      { path: '~/src/app', group: 'Pinned', pinned: true },
+      { path: '~/old', group: 'Pinned', pinned: true },
+      { path: '~/work/api', group: 'Recent' },
+      { path: '~/src/lib/', gitRepo: true, group: 'Repositories' }
+    ])
+  })
   it('tolerates missing arrays', () => {
     expect(suggestItems({})).toEqual([])
     expect(completionItems(null)).toEqual([])

@@ -16,7 +16,7 @@ and reviews, Haiku runs the mechanical steps.
 | 4 | ~~[Find in terminal](#4-find-in-terminal)~~ (done, 0.9.7) | S–M | `feature/terminal-search` |
 | 5 | ~~[Claude usage, phase 1: live limits](#5-claude-usage)~~ (done, 0.10.0) | L | `feature/usage-live` |
 | 6 | ~~[Colour tags for sessions](#6-colour-tags-for-sessions)~~ (done, 0.11.0) | S | `feature/session-colors` |
-| 7 | [Pinned directories](#7-pinned-directories) | S | `feature/pinned-dirs` |
+| 7 | ~~[Pinned directories](#7-pinned-directories)~~ (done, 0.12.0) | S | `feature/pinned-dirs` |
 | 8 | [Git branch in the sidebar](#3-time-in-state-and-git-branch-in-the-sidebar) | M | `feature/session-branch` |
 | 9 | [Claude usage, phase 2: history](#5-claude-usage) | M–L | `feature/usage-history` |
 | 10 | [Send a prompt to several sessions](#8-send-a-prompt-to-several-sessions) | M | `feature/broadcast` |
@@ -214,6 +214,8 @@ from about 6 theme-aware colours. It's stored as the tmux session option
 **Models.** Sonnet.
 
 ## 7. Pinned directories
+
+**Done in 0.12.0.**
 
 Recent directories already exist. Add pinning: a pin button on a suggestion
 in New Terminal keeps it at the top and exempt from the 10-entry limit. Stored
