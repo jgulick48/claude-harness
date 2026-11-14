@@ -6,6 +6,7 @@ package session
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // Host states.
@@ -260,6 +261,39 @@ type DirCompleter interface {
 	// paths (with a trailing "/"), searching at most 3 levels deep, skipping
 	// node_modules and hidden directories, capped at 50 results and ~3s.
 	FindRepos(ctx context.Context) ([]string, error)
+}
+
+// TranscriptRecord is one assistant message found in a Claude transcript.
+type TranscriptRecord struct {
+	Time        time.Time // the entry's timestamp (UTC)
+	Model       string
+	MsgID       string
+	Input       int64
+	Output      int64
+	CacheCreate int64
+	CacheRead   int64
+	Cwd         string // "" when the entry has none
+}
+
+// TranscriptChunk is the newly appended part of one transcript file.
+type TranscriptChunk struct {
+	Path    string
+	Size    int64 // the file's size when read
+	Start   int64 // offset the read started at (0 when Reset)
+	Reset   bool  // the file was shorter than the known offset, so it was read from 0
+	End     int64 // Start plus the bytes of complete lines consumed
+	Records []TranscriptRecord
+}
+
+// TranscriptReader is an optional Backend capability: reading the Claude
+// transcripts (<config dir>/projects/**/*.jsonl) of the host's login user.
+// Callers type-assert for it.
+type TranscriptReader interface {
+	// ReadTranscripts reads every transcript file from its known byte offset
+	// (path -> End of the previous read; unknown files start at 0). Files
+	// that exist are all returned, with no records when nothing was appended.
+	// A missing projects directory yields an empty result, not an error.
+	ReadTranscripts(ctx context.Context, known map[string]int64) ([]TranscriptChunk, error)
 }
 
 // ConfigHost is a concrete Host entry from ~/.ssh/config (no wildcards).

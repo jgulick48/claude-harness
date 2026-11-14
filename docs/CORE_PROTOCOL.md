@@ -304,6 +304,41 @@ optional; `limits` is omitted when no window is left, and each window needs both
 account, not the session, so the UI shows the newest reading (largest `at`) of
 a host's sessions as that host's limits.
 
+#### Usage history
+
+| Method | Params | Result |
+|---|---|---|
+| `usage.history` | `host` | `{"buckets":[{"hour":1794700800,"model":"claude-opus-5-5","project":"/home/u/proj","input":2,"output":264,"cacheCreate":14394,"cacheRead":24768,"messages":1}],"scannedAt":1794701234}` |
+
+Token usage from Claude's transcripts on the host (`<config dir>/projects/**/*.jsonl`, including
+`<session>/subagents/agent-*.jsonl`), as hourly buckets. Tokens only: no cost is computed.
+
+- **Buckets.** One per UTC hour (`hour`, unix seconds at the start of the hour) x `model` x
+  `project` (the entry's `cwd`; `""` when absent). `input`, `output`, `cacheCreate` and `cacheRead`
+  are token sums, `messages` counts assistant messages. `buckets` is never `null`, sorted by hour,
+  model, project, and holds the last 32 days; older ones are dropped on each scan. Models whose name
+  starts with `<` (such as `<synthetic>`) are skipped.
+- **Counting.** Claude Code writes one API message as several consecutive lines (one per content
+  block) with the same `message.id` and usage; each id counts once (consecutive duplicates within a
+  file, also across scans).
+- **Incremental scans.** Core keeps a byte offset per transcript file and, on each call, reads only
+  what was appended since (`tail -c +<offset>` in one batched shell command on the host, over SSH for
+  SSH hosts). A trailing line without a newline is left for the next scan. A file that became shorter
+  than its offset is read again from the start (earlier counts stay). Files that disappear are
+  forgotten, their buckets stay until they age out. The first scan of a host with a lot of history
+  can take a while; a scan is limited to 60 s and one that times out is an error and saves nothing.
+- **Cache.** Buckets and offsets are cached per host in
+  `<user config dir>/claude-harness/usage-history/<host id>.json` (mode 0600; override the directory
+  with `HARNESS_USAGE_HISTORY_DIR`). A corrupt file is moved aside to `.corrupt` and history starts
+  over. `hosts.remove` deletes the host's file. Concurrent calls for a host share one scan.
+- **`scannedAt`** is when the scan finished (unix seconds). A host that can't read transcripts (not
+  connected, or no such capability) answers `{"buckets":[],"scannedAt":0}`; a failing scan is an
+  error.
+- **Not included:** run-as accounts. Their transcripts live in other users' homes; only the login
+  user's config dir is read.
+
+Additive: no protocol version change.
+
 ### 5.1 Directory suggestions
 
 Used by the new-terminal dialog.

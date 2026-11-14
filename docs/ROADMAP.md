@@ -18,7 +18,7 @@ and reviews, Haiku runs the mechanical steps.
 | 6 | ~~[Colour tags for sessions](#6-colour-tags-for-sessions)~~ (done, 0.11.0) | S | `feature/session-colors` |
 | 7 | ~~[Pinned directories](#7-pinned-directories)~~ (done, 0.12.0) | S | `feature/pinned-dirs` |
 | 8 | ~~[Git branch in the sidebar](#3-time-in-state-and-git-branch-in-the-sidebar)~~ (done, 0.13.0) | M | `feature/session-branch` |
-| 9 | [Claude usage, phase 2: history](#5-claude-usage) | M–L | `feature/usage-history` |
+| 9 | ~~[Claude usage, phase 2: history](#5-claude-usage)~~ (done, 0.14.0) | M–L | `feature/usage-history` |
 | 10 | [Send a prompt to several sessions](#8-send-a-prompt-to-several-sessions) | M | `feature/broadcast` |
 
 ## Already done (no work needed)
@@ -192,6 +192,10 @@ a row of bars under each host header rather than in a status bar.
 implements; Haiku runs the check passes.
 
 ### Phase 2: history (M–L)
+
+**Done in 0.14.0.** Tokens only, no cost estimate. Run-as accounts aren't included
+(their transcripts are in other users' homes). `usage.history` (§5.4 of the
+protocol) and a History tab in the Usage dialog.
 
 - Tokens and estimated cost per day, per model and per project, read from the
   transcripts on each host.

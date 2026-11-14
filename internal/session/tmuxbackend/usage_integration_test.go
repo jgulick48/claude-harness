@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,5 +123,79 @@ func TestListUsageIntegration(t *testing.T) {
 	now = now.Add(usageEvery + time.Second)
 	if m := byID(); m[s2.ID].ClaudeStatus != "working" || m[s2.ID].RunAs != "bob" || m[s2.ID].Usage != nil {
 		t.Errorf("run-as session: %+v", m[s2.ID])
+	}
+}
+
+// ReadTranscripts through a real tmux backend (own socket), with the config
+// dir taken from CLAUDE_CONFIG_DIR.
+func TestReadTranscriptsIntegration(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
+	cfg := filepath.Join(t.TempDir(), "claude")
+	guardConfigDir(t, cfg)
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	b := newTestBackend(t)
+	ctx := context.Background()
+	if _, ok := session.Backend(b).(session.TranscriptReader); !ok {
+		t.Fatal("Backend is not a TranscriptReader")
+	}
+
+	proj := filepath.Join(cfg, "projects", "-home-u-proj")
+	if err := os.MkdirAll(filepath.Join(proj, "s1", "subagents"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ts := "2026-11-14T19:37:01.614Z"
+	main := filepath.Join(proj, "s1.jsonl")
+	agent := filepath.Join(proj, "s1", "subagents", "agent-x.jsonl")
+	a := asstLine("msg_1", "claude-opus-5-5", ts, "/home/u/proj", 2, 264, 14394, 24768)
+	if err := os.WriteFile(main, []byte(a+a+`{"type":"summary"}`+"\n"+asstLine("msg_syn", "<synthetic>", ts, "/x", 1, 1, 1, 1)+
+		asstLine("msg_2", "claude-opus-5-5", ts, "/home/u/proj", 3, 4, 5, 6)+strings.TrimSuffix(a, "\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agent, []byte(asstLine("msg_3", "claude-haiku-5", ts, "/home/u/proj", 10, 20, 30, 40)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mimic the store: count each message id once, remember the offsets.
+	known := map[string]int64{}
+	seen := map[string]bool{}
+	var in, out, cc, cr int64
+	scan := func() {
+		cs, err := b.ReadTranscripts(ctx, known)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range cs {
+			known[c.Path] = c.End
+			for _, r := range c.Records {
+				if seen[r.MsgID] {
+					continue
+				}
+				seen[r.MsgID] = true
+				in, out, cc, cr = in+r.Input, out+r.Output, cc+r.CacheCreate, cr+r.CacheRead
+			}
+		}
+	}
+	scan()
+	// msg_1 (once), msg_2, msg_3; the trailing partial line is not read yet.
+	if in != 2+3+10 || out != 264+4+20 || cc != 14394+5+30 || cr != 24768+6+40 || len(seen) != 3 {
+		t.Fatalf("first scan: in=%d out=%d cc=%d cr=%d seen=%v", in, out, cc, cr, seen)
+	}
+	// Finish the partial line (it repeats msg_1) and add a new message.
+	f, err := os.OpenFile(main, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString("\n" + asstLine("msg_4", "claude-opus-5-5", ts, "/home/u/proj", 100, 200, 300, 400))
+	f.Close()
+	scan()
+	// The completed partial line repeats msg_1 and is deduplicated; msg_4 is new.
+	if in != 115 || out != 488 || len(seen) != 4 {
+		t.Fatalf("second scan: in=%d out=%d seen=%v", in, out, seen)
+	}
+	scan()
+	if in != 115 || len(seen) != 4 {
+		t.Fatalf("idle scan changed totals: in=%d", in)
 	}
 }
