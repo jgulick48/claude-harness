@@ -1,6 +1,6 @@
 {
   "name": "claude-harness",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "private": true,
   "description": "Multi-host tmux desktop app for Claude Code sessions",
   "main": "./out/main/index.js",
