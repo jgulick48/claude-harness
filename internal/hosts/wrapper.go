@@ -80,6 +80,7 @@ func (h *sshHost) Host(ctx context.Context) session.Host {
 		ih := inner.Host(ctx)
 		host.State, host.Error = ih.State, ih.Error
 		host.Home, host.TmuxVersion = ih.Home, ih.TmuxVersion
+		host.ClaudeHooks, host.ClaudeUsage = ih.ClaudeHooks, ih.ClaudeUsage
 	}
 	return host
 }
