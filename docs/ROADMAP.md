@@ -14,7 +14,7 @@ and reviews, Haiku runs the mechanical steps.
 | 2 | ~~[Jump to the next waiting session](#2-jump-to-the-next-waiting-session)~~ (done, 0.9.5) | S | `feature/next-waiting` |
 | 3 | ~~[Time in state in the sidebar](#3-time-in-state-and-git-branch-in-the-sidebar)~~ (done, 0.9.6) | S | `feature/status-age` |
 | 4 | ~~[Find in terminal](#4-find-in-terminal)~~ (done, 0.9.7) | S–M | `feature/terminal-search` |
-| 5 | [Claude usage, phase 1: live limits](#5-claude-usage) | L | `feature/usage-live` |
+| 5 | ~~[Claude usage, phase 1: live limits](#5-claude-usage)~~ (done, 0.10.0) | L | `feature/usage-live` |
 | 6 | [Colour tags for sessions](#6-colour-tags-for-sessions) | S | `feature/session-colors` |
 | 7 | [Pinned directories](#7-pinned-directories) | S | `feature/pinned-dirs` |
 | 8 | [Git branch in the sidebar](#3-time-in-state-and-git-branch-in-the-sidebar) | M | `feature/session-branch` |
@@ -138,6 +138,10 @@ Past token counts are in the transcripts
 (`~/.claude/projects/*/*.jsonl`, the `message.usage` of each assistant entry).
 
 ### Phase 1: live limits and per-session cost (L)
+
+**Done in 0.10.0.** As built: run-as sessions get no usage (decided: the
+wrapper would override the other user's own status line). The limits show as
+a row of bars under each host header rather than in a status bar.
 
 - **Status line wrapper.** Add a `claude-harness-statusline` script (POSIX sh,
   versioned like the hook script). It reads stdin, writes the JSON atomically

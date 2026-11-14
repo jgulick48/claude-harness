@@ -4,6 +4,9 @@ import { useCore } from './CoreContext'
 import { UpdateBanner } from './UpdateBanner'
 import { HooksDialog, type HooksMode } from './HooksDialog'
 import { HostCheckDialog } from './HostCheckDialog'
+import { UsageDialog } from './UsageDialog'
+import { UsageIndicator } from './UsageIndicator'
+import { canRecordUsage, canStopUsage } from './usage'
 import { canRunCheckFromStatus } from './hostCheck'
 import { StatusBadge } from './StatusBadge'
 import { canRemoveHooks, hooksNotice, orderSessions, statusInfo, statusText, waitingCount } from './claudeStatus'
@@ -93,6 +96,8 @@ function HostMenu({
   onCheck,
   onRemove,
   onRemoveHooks,
+  onRecordUsage,
+  onStopUsage,
   onClose
 }: {
   menu: HostMenuState
@@ -101,6 +106,8 @@ function HostMenu({
   onCheck: () => void
   onRemove: () => void
   onRemoveHooks: () => void
+  onRecordUsage: () => void
+  onStopUsage: () => void
   onClose: () => void
 }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
@@ -132,6 +139,16 @@ function HostMenu({
               onClick={onReconnect}
             >
               Reconnect
+            </button>
+          )}
+          {canRecordUsage(menu.host) && (
+            <button className="ctx-item" role="menuitem" onClick={onRecordUsage}>
+              Record Claude usage…
+            </button>
+          )}
+          {canStopUsage(menu.host) && (
+            <button className="ctx-item" role="menuitem" onClick={onStopUsage}>
+              Stop recording Claude usage
             </button>
           )}
           {canRemoveHooks(menu.host) && (
@@ -196,6 +213,7 @@ function SettingsMenu({
   onToggleNotify,
   onNextWaiting,
   onAppearance,
+  onUsage,
   onClose
 }: {
   x: number
@@ -204,6 +222,7 @@ function SettingsMenu({
   onToggleNotify: () => void
   onNextWaiting: () => void
   onAppearance: () => void
+  onUsage: () => void
   onClose: () => void
 }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
@@ -215,6 +234,9 @@ function SettingsMenu({
       </button>
       <button className="ctx-item" role="menuitem" onClick={onNextWaiting}>
         Next waiting session <span className="ctx-keys">{IS_MAC ? '⇧⌘J' : 'Ctrl+Shift+J'}</span>
+      </button>
+      <button className="ctx-item" role="menuitem" onClick={onUsage}>
+        Claude usage…
       </button>
       <button className="ctx-item" role="menuitem" onClick={onAppearance}>
         Appearance…
@@ -420,6 +442,7 @@ export function Sidebar(): React.JSX.Element {
   // Hosts whose hooks notice the user dismissed with "Not now" (this run only).
   const [hooksDismissed, setHooksDismissed] = useState<Set<string>>(new Set())
   const [checkHost, setCheckHost] = useState<Host | null>(null)
+  const [usageOpen, setUsageOpen] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -769,6 +792,9 @@ export function Sidebar(): React.JSX.Element {
                   +
                 </button>
               </div>
+              {ok && !rail && (
+                <UsageIndicator hostId={host.id} sessions={sessions} onOpen={() => setUsageOpen(true)} />
+              )}
               {ok && notice && !hooksDismissed.has(host.id) && (
                 <div className="hooks-notice" role="status">
                   <span>
@@ -960,6 +986,16 @@ export function Sidebar(): React.JSX.Element {
             setHostMenu(null)
             setHooksDialog({ host: h, mode: 'remove' })
           }}
+          onRecordUsage={() => {
+            const h = hostMenu.host
+            setHostMenu(null)
+            setHooksDialog({ host: h, mode: 'usage' })
+          }}
+          onStopUsage={() => {
+            const h = hostMenu.host
+            setHostMenu(null)
+            if (client) act(client.request('hosts.installHooks', { host: h.id, usage: false }))
+          }}
           onRemove={() => {
             const h = hostMenu.host
             setHostMenu(null)
@@ -980,6 +1016,10 @@ export function Sidebar(): React.JSX.Element {
             setSettings(null)
             openAppearance()
           }}
+          onUsage={() => {
+            setSettings(null)
+            setUsageOpen(true)
+          }}
           onToggleNotify={() => {
             const v = !notify
             saveFlag(NOTIFICATIONS_KEY, v)
@@ -999,6 +1039,17 @@ export function Sidebar(): React.JSX.Element {
             const h = state.hosts.find((x) => x.id === checkHost.id) ?? checkHost
             setCheckHost(null)
             setHooksDialog({ host: h, mode: h.claudeHooks === 'outdated' ? 'update' : 'install' })
+          }}
+        />
+      )}
+      {usageOpen && (
+        <UsageDialog
+          hosts={state.hosts}
+          sessions={state.sessions}
+          onClose={() => setUsageOpen(false)}
+          onInstall={(h) => {
+            setUsageOpen(false)
+            setHooksDialog({ host: h, mode: 'usage' })
           }}
         />
       )}

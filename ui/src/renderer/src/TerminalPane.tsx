@@ -12,6 +12,7 @@ import { useCore } from './CoreContext'
 import { useTerminalAppearance } from './appearance'
 import { layoutCommand } from './shortcuts'
 import { StatusBadge } from './StatusBadge'
+import { paneUsageText, paneUsageTooltip } from './usage'
 import { autoReattachAction, closedMessage, sessionLabel, type Session } from './sessions'
 
 function cssVar(name: string, fallback: string): string {
@@ -328,6 +329,15 @@ export function TerminalPane({ paneId, focused, host, sessionId, session, hostNa
             </span>
           )}
           {session && <StatusBadge session={session} />}
+          {session?.usage && paneUsageText(session.usage) && (
+            <span
+              className={`term-usage${(session.usage.contextPct ?? 0) >= 80 ? ' warn' : ''}`}
+              data-testid="pane-usage"
+              title={paneUsageTooltip(session.usage)}
+            >
+              {paneUsageText(session.usage)}
+            </span>
+          )}
           <span className="term-host">{hostName}</span>
           <button
             className="pane-close"
