@@ -64,6 +64,7 @@ type Backend struct {
 
 	usage  usageCache  // Claude usage readings (usage.go)
 	branch branchCache // git branch per directory (branch.go)
+	load   loadCache   // previous CPU sample (load.go)
 
 	hostMu    sync.Mutex
 	hostCache session.Host

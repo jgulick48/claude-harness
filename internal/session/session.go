@@ -39,6 +39,10 @@ var (
 	ErrBadRequest = errors.New("bad request")
 	// ErrUnavailable means the host can't run sessions (e.g. tmux missing/too old).
 	ErrUnavailable = errors.New("host unavailable")
+	// ErrUnsupported means the host can't do what was asked for good (e.g. it
+	// runs an OS we can't read the load of). Unlike ErrUnavailable it won't
+	// change by retrying; the API code is "unsupported".
+	ErrUnsupported = errors.New("unsupported")
 	// ErrBusy means the session can't take a prompt right now (Claude is
 	// working, not running, or waiting while waiting sessions weren't allowed).
 	ErrBusy = errors.New("session busy")
@@ -300,6 +304,25 @@ type TranscriptReader interface {
 	// that exist are all returned, with no records when nothing was appended.
 	// A missing projects directory yields an empty result, not an error.
 	ReadTranscripts(ctx context.Context, known map[string]int64) ([]TranscriptChunk, error)
+}
+
+// HostLoad is one reading of a host's CPU and memory load.
+type HostLoad struct {
+	At       int64    `json:"at"`     // unix ms when the reading was taken
+	CPUPct   *float64 `json:"cpuPct"` // 0-100; nil until a previous sample exists
+	Cores    int      `json:"cores"`
+	Load1    float64  `json:"load1"`
+	Load5    float64  `json:"load5"`
+	Load15   float64  `json:"load15"`
+	MemTotal uint64   `json:"memTotal"` // bytes
+	MemUsed  uint64   `json:"memUsed"`  // bytes, excluding reclaimable cache
+}
+
+// LoadReader is an optional Backend capability: reading the host's CPU and
+// memory load. Callers type-assert for it. An OS it can't read fails with an
+// error wrapping ErrUnsupported.
+type LoadReader interface {
+	ReadLoad(ctx context.Context) (HostLoad, error)
 }
 
 // ConfigHost is a concrete Host entry from ~/.ssh/config (no wildcards).

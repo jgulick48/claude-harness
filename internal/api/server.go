@@ -108,6 +108,7 @@ const (
 	codeBadRequest  = "bad_request"
 	codeNotFound    = "not_found"
 	codeUnavailable = "unavailable"
+	codeUnsupported = "unsupported"
 	codeBusy        = "busy"
 	codeInternal    = "internal"
 )
@@ -132,6 +133,8 @@ func errCode(err error) string {
 		return codeUnavailable
 	case errors.Is(err, session.ErrBusy):
 		return codeBusy
+	case errors.Is(err, session.ErrUnsupported):
+		return codeUnsupported
 	}
 	return codeInternal
 }
@@ -428,7 +431,7 @@ var methods = map[string]bool{
 	"sessions.kill": true, "sessions.rename": true, "sessions.setColor": true, "sessions.sendPrompt": true,
 	"term.attach": true, "term.resize": true, "term.detach": true,
 	"hosts.configHosts": true, "remote.completeDir": true, "remote.suggestDirs": true,
-	"remote.pinDir": true, "remote.unpinDir": true, "usage.history": true,
+	"remote.pinDir": true, "remote.unpinDir": true, "usage.history": true, "hosts.load": true,
 	"hosts.installHooks": true, "hosts.removeHooks": true,
 	"hosts.check": true,
 }
@@ -538,6 +541,9 @@ func (cn *conn) call(method string, id int64, p *params) (any, error) {
 	}
 	if method == "hosts.check" {
 		return cn.handleCheck(ctx, p) // check.go
+	}
+	if method == "hosts.load" {
+		return cn.handleHostLoad(ctx, p) // hostload.go
 	}
 	if strings.HasPrefix(method, "hosts.") {
 		return cn.hostsCall(method, p)

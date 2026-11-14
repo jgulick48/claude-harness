@@ -20,6 +20,7 @@ and reviews, Haiku runs the mechanical steps.
 | 8 | ~~[Git branch in the sidebar](#3-time-in-state-and-git-branch-in-the-sidebar)~~ (done, 0.13.0) | M | `feature/session-branch` |
 | 9 | ~~[Claude usage, phase 2: history](#5-claude-usage)~~ (done, 0.14.0) | M–L | `feature/usage-history` |
 | 10 | ~~[Send a prompt to several sessions](#8-send-a-prompt-to-several-sessions)~~ (done, 0.15.0) | M | `feature/broadcast` |
+| 11 | ~~[Host CPU and memory](#9-host-cpu-and-memory)~~ (done, 0.16.0) | S–M | `feature/host-load` |
 
 ## Already done (no work needed)
 
@@ -250,3 +251,18 @@ shell.
 lists the targets and skips busy ones; an integration test that the text
 arrives.
 **Models.** Opus designs the safety rules; Sonnet implements.
+
+## 9. Host CPU and memory
+
+**Done in 0.16.0.** As built: right-click a host, "Show CPU and memory" (off by
+default, remembered per host). Two thin bars under the host header show CPU and
+memory use, with load average, core count and the age of the reading in the
+tooltip. The UI polls the new `hosts.load` method every 5 s per enabled host,
+only while the window is visible. Core reads Linux and macOS hosts with one
+batched shell command (over SSH for SSH hosts) and answers `unsupported` for
+other OSes, which hides the menu item for that host.
+
+**Tests.** Parser and script unit tests on captured Linux and macOS output, an
+integration test against the real local host, API tests with a fake, an
+`sshHost` pass-through test, and a renderer e2e test for the toggle.
+**Models.** Sonnet.
