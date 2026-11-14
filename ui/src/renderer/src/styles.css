@@ -424,6 +424,7 @@ body {
 
 /* Claude status */
 .status { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--fg-muted); }
+.status-age { font-variant-numeric: tabular-nums; opacity: 0.8; }
 .status-icon { display: inline-block; width: 1.1em; text-align: center; font-size: 13px; }
 .status-working .status-icon { animation: status-spin 2.4s linear infinite; }
 .status-waiting { color: var(--accent); font-weight: 600; }

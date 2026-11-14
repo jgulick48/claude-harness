@@ -42,6 +42,34 @@ test('Claude status shows in the row, title and dock badge', async ({ page }) =>
   await expect(row).toContainText('Idle')
 })
 
+test('the row shows how long Claude has been in its state', async ({ page }) => {
+  tmux('new-session', '-d', '-s', 'age', '-c', env().core.home)
+  tmux('set-option', '-t', 'age', '@harness_name', 'age-test')
+  tmux('send-keys', '-t', 'age', 'exec sleep 600', 'Enter')
+  const row = local(page).locator('[data-row]').filter({ hasText: 'age-test' })
+  const now = Math.floor(Date.now() / 1000)
+
+  tmux('set-option', '-t', 'age', '@claude_status_at', String(now - 12 * 60 - 30))
+  tmux('set-option', '-t', 'age', '@claude_status', 'waiting')
+  await expect(row.locator('.status')).toHaveText(/Waiting\s+12m/)
+
+  // A fresh state shows no age (under a minute).
+  tmux('set-option', '-t', 'age', '@claude_status_at', String(now))
+  tmux('set-option', '-t', 'age', '@claude_status', 'working')
+  await expect(row.locator('.status')).toHaveText(/^\W*Working$/)
+
+  // The rail tooltip carries the age too.
+  tmux('set-option', '-t', 'age', '@claude_status_at', String(now - 3 * 3600 - 60))
+  tmux('set-option', '-t', 'age', '@claude_status', 'idle')
+  await expect(row.locator('.status')).toHaveText(/Idle\s+3h/)
+  await page.keyboard.press(keys.rail)
+  await expect(page.locator('[data-testid="rail-item"][aria-label*="age-test"]')).toHaveAttribute(
+    'aria-label',
+    /age-test — Idle 3h/
+  )
+  await page.keyboard.press(keys.rail)
+})
+
 test('the next-waiting shortcut visits waiting sessions, longest-waiting first', async ({ page }) => {
   const now = Math.floor(Date.now() / 1000)
   // Three sessions running a non-shell process, named so their rows are easy to find.

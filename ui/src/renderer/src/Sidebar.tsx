@@ -6,7 +6,8 @@ import { HooksDialog, type HooksMode } from './HooksDialog'
 import { HostCheckDialog } from './HostCheckDialog'
 import { canRunCheckFromStatus } from './hostCheck'
 import { StatusBadge } from './StatusBadge'
-import { canRemoveHooks, hooksNotice, orderSessions, statusInfo, waitingCount } from './claudeStatus'
+import { canRemoveHooks, hooksNotice, orderSessions, statusInfo, statusText, waitingCount } from './claudeStatus'
+import { useNow } from './useNow'
 import {
   ATTENTION_SORT_KEY,
   loadFlag,
@@ -333,6 +334,7 @@ function RailView({
   onAttach: (r: NavRef) => void
   onContext: (e: React.MouseEvent, host: Host, session: Session) => void
 }): React.JSX.Element {
+  const now = useNow()
   return (
     <>
       <header className="rail-header">
@@ -358,7 +360,7 @@ function RailView({
               const info = statusInfo(s)
               const isActive = active?.host === host.id && active.session === s.id
               const isOpen = !isActive && visible.has(`${host.id}/${s.id}`)
-              const text = (info ? `${label} — ${info.label}` : label) + runAsSuffix(s)
+              const text = (info ? `${label} — ${statusText(s, now)}` : label) + runAsSuffix(s)
               return (
                 <button
                   key={s.id}
