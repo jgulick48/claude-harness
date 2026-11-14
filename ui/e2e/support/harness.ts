@@ -99,6 +99,7 @@ export const keys = {
   zoomReset: `${mod}+Digit0`,
   splitRight: isMac ? 'Meta+d' : 'Control+Shift+D',
   splitDown: isMac ? 'Meta+Shift+d' : 'Control+Shift+E',
+  find: isMac ? 'Meta+f' : 'Control+Shift+F',
   closePane: isMac ? 'Meta+w' : 'Control+Shift+W',
   focusLeft: `${mod}+Alt+ArrowLeft`,
   focusRight: `${mod}+Alt+ArrowRight`

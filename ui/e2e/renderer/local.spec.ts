@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { expect, shot, runInTerminal, test, useEnv } from '../support/harness'
+import { expect, keys, shot, runInTerminal, test, useEnv } from '../support/harness'
 
 // tmux has no Windows build; these scenarios drive a real local tmux.
 test.skip(process.platform === 'win32', 'needs tmux')
@@ -285,4 +285,62 @@ test('copying from a full-screen program: OSC 52 reaches the clipboard, a forced
   await page.evaluate(() => (window.__e2e.menuChoice = null))
   // Leave the shell sane for anything after this.
   await runInTerminal(page, `printf '\\033[?1003l\\033[?1006l'; echo done-$((3+4))`, 'done-7')
+})
+
+test('find in terminal: count, next, options, invalid regex, Escape returns focus', async ({ page }) => {
+  await page.getByRole('button', { name: 'New terminal', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'New terminal' })
+  await dialog.getByRole('combobox', { name: 'Directory' }).fill('~/proj/beta')
+  await dialog.getByLabel('Name (optional)').fill('finder')
+  await dialog.getByLabel('Run as user (optional)').fill('') // remembered from another test
+  await dialog.getByRole('button', { name: 'Create' }).click()
+  await expect(dialog).toBeHidden()
+  // A fresh shell can drop keys typed before its prompt is up (seen on macOS CI).
+  await expect(page.locator('.xterm-rows')).toContainText('$')
+  // The command line spells the word via $A, so only the output lines match "alpha".
+  await runInTerminal(page, 'A=al; echo ${A}pha one; echo beta two; echo ${A}pha three; echo fin-$((4+4))', 'fin-8')
+
+  const bar = page.getByRole('search', { name: 'Find in terminal' })
+  const input = bar.getByRole('textbox', { name: 'Find in terminal' })
+  const count = bar.locator('.find-count')
+  await expect(bar).toBeHidden()
+  if (process.platform !== 'darwin') {
+    // Plain Ctrl+F belongs to the shell.
+    await page.keyboard.press('Control+f')
+    await expect(bar).toBeHidden()
+  }
+  await page.keyboard.press(keys.find)
+  await expect(bar).toBeVisible()
+  await expect(input).toBeFocused()
+  await input.fill('alpha')
+  await expect(count).toHaveText(/of 2$|^2 matches$/)
+  const first = await count.innerText()
+  await page.keyboard.press('Enter')
+  await expect(count).not.toHaveText(first)
+  await page.keyboard.press('Shift+Enter')
+  await expect(count).toHaveText(first)
+
+  // The shortcut on an open bar re-focuses it and selects its text.
+  await page.locator('.xterm-screen').click()
+  await expect(input).not.toBeFocused()
+  await page.keyboard.press(keys.find)
+  await expect(input).toBeFocused()
+  expect(await input.evaluate((el: HTMLInputElement) => el.selectionEnd! - el.selectionStart!)).toBe(5)
+
+  await input.fill('ALPHA')
+  await expect(count).toHaveText(/of 2$|^2 matches$/)
+  await bar.getByRole('button', { name: 'Match case' }).click()
+  await expect(bar.getByRole('button', { name: 'Match case' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(count).toHaveText('No results')
+  await bar.getByRole('button', { name: 'Match case' }).click()
+
+  await bar.getByRole('button', { name: 'Regular expression' }).click()
+  await input.fill('(')
+  await expect(count).toHaveText('Invalid regex')
+  await input.fill('al.ha')
+  await expect(count).toHaveText(/of 2$|^2 matches$/)
+
+  await page.keyboard.press('Escape')
+  await expect(bar).toBeHidden()
+  await expect(page.locator('.xterm-helper-textarea')).toBeFocused()
 })
