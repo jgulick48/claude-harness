@@ -12,8 +12,10 @@ const local = (page: import('@playwright/test').Page) =>
 /** tmux against the core's private server only (never the user's). */
 const tmux = (...args: string[]): void => privateTmux(['-L', env().core.tmuxSocket, '-f', '/dev/null', ...args])
 
+// Sessions start in "/" so the filter can only match the colour: it also
+// fuzzy-matches the path, and a long home path (as on CI) can contain "green".
 function session(name: string, color?: string): void {
-  tmux('new-session', '-d', '-s', name, '-c', env().core.home)
+  tmux('new-session', '-d', '-s', name, '-c', '/')
   tmux('set-option', '-t', name, '@harness_name', name)
   if (color) tmux('set-option', '-t', name, '@harness_color', color)
   tmux('send-keys', '-t', name, 'exec sleep 600', 'Enter')
