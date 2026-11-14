@@ -19,7 +19,7 @@ and reviews, Haiku runs the mechanical steps.
 | 7 | ~~[Pinned directories](#7-pinned-directories)~~ (done, 0.12.0) | S | `feature/pinned-dirs` |
 | 8 | ~~[Git branch in the sidebar](#3-time-in-state-and-git-branch-in-the-sidebar)~~ (done, 0.13.0) | M | `feature/session-branch` |
 | 9 | ~~[Claude usage, phase 2: history](#5-claude-usage)~~ (done, 0.14.0) | M–L | `feature/usage-history` |
-| 10 | [Send a prompt to several sessions](#8-send-a-prompt-to-several-sessions) | M | `feature/broadcast` |
+| 10 | ~~[Send a prompt to several sessions](#8-send-a-prompt-to-several-sessions)~~ (done, 0.15.0) | M | `feature/broadcast` |
 
 ## Already done (no work needed)
 
@@ -230,6 +230,11 @@ list.
 **Models.** Sonnet.
 
 ## 8. Send a prompt to several sessions
+
+**Done in 0.15.0.** As built: the core enforces the rules (fresh status check at
+send time, `busy` error), pastes the text as one bracketed paste and then
+presses Enter. Sessions are selected with Ctrl/Cmd+click, "Select idle" or
+"Select waiting".
 
 Select sessions (Ctrl/Cmd+click on rows, or "select all waiting/idle" in the
 filter), then "Send prompt…". A dialog takes the text and lists every target by

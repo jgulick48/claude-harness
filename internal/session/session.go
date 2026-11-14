@@ -6,7 +6,10 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
+	"unicode"
 )
 
 // Host states.
@@ -36,6 +39,9 @@ var (
 	ErrBadRequest = errors.New("bad request")
 	// ErrUnavailable means the host can't run sessions (e.g. tmux missing/too old).
 	ErrUnavailable = errors.New("host unavailable")
+	// ErrBusy means the session can't take a prompt right now (Claude is
+	// working, not running, or waiting while waiting sessions weren't allowed).
+	ErrBusy = errors.New("session busy")
 )
 
 // Errors returned by backends wrap one of the sentinels above where applicable
@@ -381,4 +387,63 @@ type HostReport struct {
 // the host (it never changes anything on the host). Callers type-assert for it.
 type HostChecker interface {
 	Check(ctx context.Context) (HostReport, error)
+}
+
+// MaxPromptBytes is the longest prompt SendPrompt accepts, after cleaning.
+const MaxPromptBytes = 16 << 10
+
+// CleanPrompt normalizes prompt text for sending: CRLF and CR become LF,
+// trailing newlines are dropped, and every control character except "\n" and
+// "\t" (ESC included) is removed. Empty or oversized (> MaxPromptBytes) text
+// wraps ErrBadRequest.
+func CleanPrompt(text string) (string, error) {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	text = strings.TrimRight(text, "\n")
+	text = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return r
+		}
+		if unicode.IsControl(r) { // C0, DEL and C1
+			return -1
+		}
+		return r
+	}, text)
+	if strings.TrimSpace(text) == "" {
+		return "", fmt.Errorf("%w: prompt is empty", ErrBadRequest)
+	}
+	if len(text) > MaxPromptBytes {
+		return "", fmt.Errorf("%w: prompt is longer than %d KiB", ErrBadRequest, MaxPromptBytes>>10)
+	}
+	return text, nil
+}
+
+// PromptAllowed reports whether a session with the given Claude status may
+// receive a prompt: idle always, waiting only when allowWaiting. Otherwise it
+// returns an ErrBusy error saying why.
+func PromptAllowed(status string, allowWaiting bool) error {
+	switch status {
+	case ClaudeIdle:
+		return nil
+	case ClaudeWaiting:
+		if allowWaiting {
+			return nil
+		}
+		return fmt.Errorf("%w: Claude is waiting for input (enable waiting sessions to send)", ErrBusy)
+	case ClaudeWorking:
+		return fmt.Errorf("%w: Claude is working in this session", ErrBusy)
+	case ClaudeUnknown:
+		return fmt.Errorf("%w: Claude's state in this session is unknown", ErrBusy)
+	}
+	return fmt.Errorf("%w: Claude isn't running in this session", ErrBusy)
+}
+
+// PromptSender is an optional Backend capability: typing a prompt into a
+// session's Claude. Callers type-assert for it.
+//
+// SendPrompt cleans text (CleanPrompt), re-reads the session's Claude status
+// itself and refuses unless PromptAllowed (ErrBusy; a missing session is
+// ErrNotFound), then pastes the text into the active pane and presses Enter.
+type PromptSender interface {
+	SendPrompt(ctx context.Context, id, text string, allowWaiting bool) error
 }

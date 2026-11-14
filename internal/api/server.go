@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
@@ -107,6 +108,7 @@ const (
 	codeBadRequest  = "bad_request"
 	codeNotFound    = "not_found"
 	codeUnavailable = "unavailable"
+	codeBusy        = "busy"
 	codeInternal    = "internal"
 )
 
@@ -128,6 +130,8 @@ func errCode(err error) string {
 		return codeBadRequest
 	case errors.Is(err, session.ErrUnavailable):
 		return codeUnavailable
+	case errors.Is(err, session.ErrBusy):
+		return codeBusy
 	}
 	return codeInternal
 }
@@ -400,26 +404,28 @@ func parseID(raw json.RawMessage) *int64 {
 }
 
 type params struct {
-	Host        string          `json:"host"`
-	Session     string          `json:"session"`
-	Dir         string          `json:"dir"`
-	Name        string          `json:"name"`
-	Target      string          `json:"target"`
-	Fingerprint string          `json:"fingerprint"`
-	Command     string          `json:"command"`
-	RunAs       string          `json:"runAs"`
-	Cols        json.RawMessage `json:"cols"`
-	Rows        json.RawMessage `json:"rows"`
-	Stream      json.RawMessage `json:"stream"`
-	Prefix      string          `json:"prefix"`
-	Usage       json.RawMessage `json:"usage"`
-	Color       string          `json:"color"`
+	Host         string          `json:"host"`
+	Session      string          `json:"session"`
+	Dir          string          `json:"dir"`
+	Name         string          `json:"name"`
+	Target       string          `json:"target"`
+	Fingerprint  string          `json:"fingerprint"`
+	Command      string          `json:"command"`
+	RunAs        string          `json:"runAs"`
+	Cols         json.RawMessage `json:"cols"`
+	Rows         json.RawMessage `json:"rows"`
+	Stream       json.RawMessage `json:"stream"`
+	Prefix       string          `json:"prefix"`
+	Usage        json.RawMessage `json:"usage"`
+	Color        string          `json:"color"`
+	Text         string          `json:"text"`
+	AllowWaiting bool            `json:"allowWaiting"`
 }
 
 var methods = map[string]bool{
 	"hosts.list": true, "hosts.add": true, "hosts.remove": true, "hosts.connect": true,
 	"hosts.trustKey": true, "sessions.list": true, "sessions.create": true,
-	"sessions.kill": true, "sessions.rename": true, "sessions.setColor": true,
+	"sessions.kill": true, "sessions.rename": true, "sessions.setColor": true, "sessions.sendPrompt": true,
 	"term.attach": true, "term.resize": true, "term.detach": true,
 	"hosts.configHosts": true, "remote.completeDir": true, "remote.suggestDirs": true,
 	"remote.pinDir": true, "remote.unpinDir": true, "usage.history": true,
@@ -608,6 +614,19 @@ func (cn *conn) call(method string, id int64, p *params) (any, error) {
 			return nil, err
 		}
 		return nil, b.SetColor(ctx, p.Session, p.Color)
+	case "sessions.sendPrompt":
+		if err := need("session", p.Session); err != nil {
+			return nil, err
+		}
+		text, err := session.CleanPrompt(p.Text)
+		if err != nil {
+			return nil, err
+		}
+		ps, ok := b.(session.PromptSender)
+		if !ok {
+			return nil, fmt.Errorf("%w: host cannot send prompts", session.ErrUnavailable)
+		}
+		return nil, ps.SendPrompt(ctx, p.Session, text, p.AllowWaiting)
 	case "term.attach":
 		if err := need("session", p.Session); err != nil {
 			return nil, err

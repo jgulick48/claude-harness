@@ -1,7 +1,9 @@
 package tmuxbackend
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -184,6 +186,87 @@ func TestSubscribeStatusChange(t *testing.T) {
 			}
 		case <-end:
 			t.Fatal("no notification for status change")
+		}
+	}
+}
+
+// A pane that enables bracketed paste and dumps its raw input to a file, with
+// a fake Claude status set by hand.
+func TestSendPromptIntegration(t *testing.T) {
+	old := promptEnterDelay
+	promptEnterDelay = 50 * time.Millisecond
+	t.Cleanup(func() { promptEnterDelay = old })
+
+	b := newTestBackend(t)
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	s := mustCreate(t, b, session.CreateOptions{Dir: dir})
+	// "dd" is the pane command (not a shell), so a status option is honoured.
+	tm(t, b, "send-keys", "-t", s.ID, "printf '\\033[?2004h'; stty raw -echo; exec dd of="+out+" bs=1 2>/dev/null", "Enter")
+	waitPaneCmd(t, b, s.ID, "dd")
+	// Let the printf (bracketed paste on) land before pasting.
+	for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(25 * time.Millisecond) {
+		if tm(t, b, "display-message", "-p", "-t", s.ID, "#{bracketed_paste}") == "1" {
+			break
+		}
+	}
+	ctx := context.Background()
+
+	tm(t, b, "set-option", "-t", s.ID, "@claude_status", "working")
+	waitStatus(t, b, "working")
+	if err := b.SendPrompt(ctx, s.ID, "nope", false); !errors.Is(err, session.ErrBusy) {
+		t.Fatalf("working: %v", err)
+	}
+	tm(t, b, "set-option", "-t", s.ID, "@claude_status", "waiting")
+	waitStatus(t, b, "waiting")
+	if err := b.SendPrompt(ctx, s.ID, "nope", false); !errors.Is(err, session.ErrBusy) {
+		t.Fatalf("waiting: %v", err)
+	}
+	if err := b.SendPrompt(ctx, "$9999", "nope", true); !errors.Is(err, session.ErrNotFound) {
+		t.Fatalf("missing: %v", err)
+	}
+	if got, _ := os.ReadFile(out); len(got) != 0 {
+		t.Fatalf("refused sends wrote %q", got)
+	}
+
+	tm(t, b, "set-option", "-t", s.ID, "@claude_status", "idle")
+	waitStatus(t, b, "idle")
+	if err := b.SendPrompt(ctx, s.ID, "line1\r\nline2\x1b[201~\n\n", false); err != nil {
+		t.Fatal(err)
+	}
+	want := "\x1b[200~line1\nline2[201~\x1b[201~\r"
+	var got []byte
+	for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+		if got, _ = os.ReadFile(out); string(got) == want {
+			break
+		}
+	}
+	if string(got) != want {
+		t.Fatalf("pane received %q, want %q", got, want)
+	}
+	if bufs := tm(t, b, "list-buffers"); bufs != "" {
+		t.Fatalf("buffer left behind: %q", bufs)
+	}
+
+	// tmux treats an argument ending in ";" as a command separator; the
+	// prompt must still arrive exactly, including a trailing backslash.
+	for _, text := range []string{"fix this;", `a\;`, ";"} {
+		if err := os.Truncate(out, 0); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.SendPrompt(ctx, s.ID, text, false); err != nil {
+			t.Fatalf("%q: %v", text, err)
+		}
+		want := "\x1b[200~" + text + "\x1b[201~\r"
+		for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+			// dd keeps its offset after the truncate, so the file starts with NULs.
+			if got, _ = os.ReadFile(out); string(bytes.TrimLeft(got, "\x00")) == want {
+				break
+			}
+		}
+		got = bytes.TrimLeft(got, "\x00")
+		if string(got) != want {
+			t.Fatalf("%q: pane received %q, want %q", text, got, want)
 		}
 	}
 }

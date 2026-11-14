@@ -71,6 +71,7 @@ type fakeBackend struct {
 	err      error // returned by all ops when set
 	term     *fakeTerm
 	termCh   chan *fakeTerm
+	statuses map[string]string // Claude status per session id, for SendPrompt
 }
 
 func newFakeBackend() *fakeBackend { return newFakeBackendID("local") }
@@ -108,6 +109,21 @@ func (b *fakeBackend) Rename(_ context.Context, id, name string) error {
 }
 func (b *fakeBackend) SetColor(_ context.Context, id, color string) error {
 	b.rec("color " + id + "|" + color)
+	return b.err
+}
+
+// SendPrompt mimics the real backend's rules against b.statuses.
+func (b *fakeBackend) SendPrompt(_ context.Context, id, text string, allowWaiting bool) error {
+	b.mu.Lock()
+	st, ok := b.statuses[id]
+	b.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("%w: %s", session.ErrNotFound, id)
+	}
+	if err := session.PromptAllowed(st, allowWaiting); err != nil {
+		return err
+	}
+	b.rec(fmt.Sprintf("prompt %s|%s|%v", id, text, allowWaiting))
 	return b.err
 }
 func (b *fakeBackend) Subscribe(fn func([]session.Session)) func() {
@@ -233,6 +249,7 @@ func TestErrorMapping(t *testing.T) {
 		session.ErrNotFound:    "not_found",
 		session.ErrBadRequest:  "bad_request",
 		session.ErrUnavailable: "unavailable",
+		session.ErrBusy:        "busy",
 		errors.New("boom"):     "internal",
 	} {
 		b.mu.Lock()
