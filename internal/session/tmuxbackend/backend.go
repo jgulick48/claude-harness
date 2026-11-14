@@ -362,17 +362,37 @@ func (b *Backend) applyFileStatus(ctx context.Context, list []session.Session, f
 		b.log.Warn("resolving status dir failed", "err", err)
 		return
 	}
-	got, err := b.readStatusFiles(ctx, dir, paths)
+	// Sessions with a reported state need a liveness check (see below).
+	var live []int
+	for i, p := range files {
+		if p != "" && list[i].RunAs != "" {
+			live = append(live, i)
+		}
+	}
+	got, procs, err := b.readStatusFiles(ctx, dir, paths, true)
 	if err != nil {
 		b.log.Warn("reading run-as status files failed", "err", err)
 		return
 	}
+	reported := map[string]int{} // session id -> index, for sessions with a state
+	for _, i := range live {
+		if content, ok := got[files[i]]; ok {
+			if state, _, _ := parseStatusFile(content); isReportedState(state) {
+				reported[list[i].ID] = i
+			}
+		}
+	}
+	dead := b.deadSessions(ctx, reported, procs)
 	for i, p := range files {
 		content, ok := got[p]
 		if !ok {
 			continue
 		}
 		state, at, _ := parseStatusFile(content)
+		if dead[list[i].ID] {
+			// Claude was killed without its SessionEnd hook: the file is stale.
+			state = ""
+		}
 		// A reported state is authoritative: the pane command of a run-as
 		// session is the wrapper shell, not claude, so it can't veto it.
 		// Without one (empty file after SessionEnd) fall back as usual.
@@ -383,6 +403,58 @@ func (b *Backend) applyFileStatus(ctx context.Context, list []session.Session, f
 			list[i].ClaudeStatus, list[i].ClaudeStatusAt = deriveClaudeStatus("", panes[i]), 0
 		}
 	}
+}
+
+func isReportedState(s string) bool {
+	return s == session.ClaudeWorking || s == session.ClaudeWaiting || s == session.ClaudeIdle
+}
+
+// deadSessions returns the ids (keys of reported) of run-as sessions whose
+// panes have no claude process beneath them. Any failure, or a process table
+// that can't be trusted, yields nil: statuses then stay as the files say.
+func (b *Backend) deadSessions(ctx context.Context, reported map[string]int, procs []proc) map[string]bool {
+	if len(reported) == 0 {
+		return nil
+	}
+	if len(procs) == 0 {
+		b.log.Debug("run-as liveness check skipped: no process table")
+		return nil
+	}
+	out, err := b.run.Output(ctx, "list-panes", "-a", "-F", "#{session_id}"+fieldSep+"#{pane_pid}")
+	if err != nil {
+		b.log.Debug("listing panes for run-as liveness failed", "err", err)
+		return nil
+	}
+	var roots []int
+	bySession := map[string][]int{}
+	for _, line := range strings.Split(string(out), "\n") {
+		sid, pid, ok := strings.Cut(line, fieldSep)
+		if _, want := reported[sid]; !ok || !want {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(pid))
+		if err != nil {
+			continue
+		}
+		bySession[sid] = append(bySession[sid], n)
+		roots = append(roots, n)
+	}
+	alive, ok := claudeAlive(procs, roots)
+	if !ok {
+		b.log.Debug("run-as liveness check skipped: process table not trustworthy")
+		return nil
+	}
+	dead := map[string]bool{}
+	for sid := range reported {
+		found := false
+		for _, pid := range bySession[sid] {
+			found = found || alive[pid]
+		}
+		if !found {
+			dead[sid] = true
+		}
+	}
+	return dead
 }
 
 // expandDir expands "~" against the host's home. Host paths are always POSIX

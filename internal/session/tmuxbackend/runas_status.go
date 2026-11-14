@@ -151,12 +151,17 @@ func (b *Backend) statusSetup(ctx context.Context) (dir string, err error) {
 	return hookDir, nil
 }
 
+// psSeparator splits the file part of readStatusFiles' output from the
+// process table. File lines start with a path, so it can't collide.
+const psSeparator = "--- ps"
+
 // readStatusFiles reads every path in one shell exec and returns path ->
-// contents. Only valid status paths are read.
-func (b *Backend) readStatusFiles(ctx context.Context, dir string, paths []string) (map[string]string, error) {
+// contents. Only valid status paths are read. With withPS the same exec also
+// lists the host's processes (nil if ps failed), saving a round-trip.
+func (b *Backend) readStatusFiles(ctx context.Context, dir string, paths []string, withPS bool) (map[string]string, []proc, error) {
 	ops, ok := b.ops.(shellOps)
 	if !ok {
-		return nil, fmt.Errorf("host %s cannot run shell snippets", b.id)
+		return nil, nil, fmt.Errorf("host %s cannot run shell snippets", b.id)
 	}
 	var quoted []string
 	for _, p := range paths {
@@ -165,24 +170,30 @@ func (b *Backend) readStatusFiles(ctx context.Context, dir string, paths []strin
 		}
 	}
 	if len(quoted) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	script := `for f in ` + strings.Join(quoted, " ") + `; do printf '%s\t' "$f"; ` +
 		// Regular files only, at most 64 bytes: the target user owns the file and
 		// could swap in a FIFO or a link to /dev/zero, which would hang the poll.
 		`[ -f "$f" ] && [ ! -L "$f" ] && head -c 64 "$f" 2>/dev/null | head -n 1 | tr -d '\r\t\n'; echo; done`
+	if withPS {
+		// Lines are capped: long command lines (java, node) would otherwise
+		// make this poll, which runs every couple of seconds, much bigger.
+		script += "\nprintf '%s\\n' '" + psSeparator + "'\nps -A -o pid= -o ppid= -o comm= -o args= 2>/dev/null | cut -c1-300"
+	}
 	out, err := ops.shell(ctx, script)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	filePart, psPart, _ := strings.Cut(string(out), "\n"+psSeparator+"\n")
 	res := map[string]string{}
-	for _, line := range strings.Split(string(out), "\n") {
+	for _, line := range strings.Split(filePart, "\n") {
 		p, content, ok := strings.Cut(line, "\t")
 		if ok && validStatusFile(dir, p) {
 			res[p] = strings.TrimSpace(content)
 		}
 	}
-	return res, nil
+	return res, parsePS(psPart), nil
 }
 
 // removeStatusFile deletes a session's status file, best effort.

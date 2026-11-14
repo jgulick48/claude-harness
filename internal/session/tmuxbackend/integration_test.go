@@ -525,6 +525,95 @@ func TestCreateRunAs(t *testing.T) {
 	}
 }
 
+// realClaudeStub returns the path of a copy of this test binary named
+// "claude", which sleeps when run (see TestMain): a process whose comm really
+// is "claude". A #!/bin/sh script's comm is "sh", and a symlink to sleep fails
+// with multi-call coreutils (uutils), which check the name they run under.
+func realClaudeStub(t *testing.T) string {
+	t.Helper()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(p, data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// claudePids returns the pids of processes running the given stub path.
+func claudePids(stub string) []string {
+	out, _ := exec.Command("pgrep", "-f", "^"+stub+" ").Output()
+	return strings.Fields(string(out))
+}
+
+// A run-as session whose claude was killed without SessionEnd leaves a stale
+// "working" file; it must stop being reported once no claude process remains.
+func TestRunAsStaleStatusAfterClaudeKilled(t *testing.T) {
+	if _, err := exec.LookPath("pgrep"); err != nil {
+		t.Skip("pgrep not found")
+	}
+	b := newTestBackend(t)
+	bin, cbin := t.TempDir(), t.TempDir()
+	fakeSudo := "#!/bin/sh\n[ \"$1\" = -iu ] && [ \"$3\" = -- ] || exit 97\nshift 3\nPATH=" + cbin + ":$PATH\nexport PATH\nexec \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "sudo"), []byte(fakeSudo), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b.sudo = filepath.Join(bin, "sudo")
+	stub := realClaudeStub(t)
+	fakeClaude := `#!/bin/sh
+while [ $# -gt 0 ]; do
+	[ "$1" = --settings ] && settings=$2
+	shift
+done
+[ -n "$settings" ] || exit 98
+printf '{"hook_event_name":"UserPromptSubmit"}' | sh "$(dirname "$settings")/hook-v` + fmt.Sprint(claudehooks.Version) + `.sh"
+exec ` + stub + ` 60
+`
+	if err := os.WriteFile(filepath.Join(cbin, "claude"), []byte(fakeClaude), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for _, p := range claudePids(stub) {
+			exec.Command("kill", "-9", p).Run()
+		}
+	})
+	s := mustCreate(t, b, session.CreateOptions{Dir: t.TempDir(), Command: session.CommandClaude, RunAs: "bob"})
+	status := func() string {
+		list, err := b.List(context.Background())
+		if err != nil || len(list) != 1 || list[0].ID != s.ID {
+			return "?"
+		}
+		return list[0].ClaudeStatus
+	}
+	waitFor(t, func() bool { return status() == session.ClaudeWorking })
+	// Still alive: stays working across several polls.
+	for i := 0; i < 5; i++ {
+		if got := status(); got != session.ClaudeWorking {
+			t.Fatalf("status while claude lives = %q", got)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	pids := claudePids(stub)
+	if len(pids) == 0 {
+		t.Fatal("fake claude process not found")
+	}
+	for _, p := range pids {
+		exec.Command("kill", "-9", p).Run()
+	}
+	waitFor(t, func() bool { return status() == "" })
+	// The wrapper shell (and sudo) stays alive; the file is untouched.
+	file := tm(t, b, "display-message", "-p", "-t", s.ID, "#{@harness_status_file}")
+	if d, err := os.ReadFile(file); err != nil || !strings.HasPrefix(string(d), "working ") {
+		t.Errorf("status file = %q, %v", d, err)
+	}
+}
+
 func TestRunAsClaudeStatus(t *testing.T) {
 	b := newTestBackend(t)
 	bin, cbin := t.TempDir(), t.TempDir()
@@ -546,7 +635,7 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$settings" ] || exit 98
 printf '{"hook_event_name":"UserPromptSubmit"}' | sh "$(dirname "$settings")/hook-v` + fmt.Sprint(claudehooks.Version) + `.sh"
-exec sleep 30
+exec ` + realClaudeStub(t) + ` 30
 `
 	if err := os.WriteFile(filepath.Join(cbin, "claude"), []byte(fakeClaude), 0o755); err != nil {
 		t.Fatal(err)
@@ -629,7 +718,7 @@ func TestReadStatusFilesSkipsSpecialFiles(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	got, err := b.readStatusFiles(ctx, dir, []string{fifo, zero, good})
+	got, _, err := b.readStatusFiles(ctx, dir, []string{fifo, zero, good}, false)
 	if err != nil {
 		t.Fatalf("readStatusFiles: %v", err)
 	}
