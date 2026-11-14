@@ -66,8 +66,9 @@ func (b *fakeInner) List(context.Context) ([]session.Session, error) { return b.
 func (b *fakeInner) Create(context.Context, session.CreateOptions) (session.Session, error) {
 	return session.Session{ID: "$1"}, nil
 }
-func (b *fakeInner) Kill(context.Context, string) error           { return nil }
-func (b *fakeInner) Rename(context.Context, string, string) error { return nil }
+func (b *fakeInner) Kill(context.Context, string) error             { return nil }
+func (b *fakeInner) Rename(context.Context, string, string) error   { return nil }
+func (b *fakeInner) SetColor(context.Context, string, string) error { return nil }
 func (b *fakeInner) Attach(context.Context, string, int, int) (session.Terminal, error) {
 	return nil, errors.New("no")
 }

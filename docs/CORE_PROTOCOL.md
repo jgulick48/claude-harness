@@ -116,6 +116,8 @@ Session: {"id":"$3","name":"h-api-1","harnessName":"","managed":true,"cwd":"/hom
          see §5.2
          usage: Claude's latest usage reading (§5.4); present only while Claude runs
          in a non-run-as session and a reading exists
+         color: the session's colour tag (@harness_color), one of "red", "orange",
+         "yellow", "green", "blue", "purple"; omitted when not set
 ```
 
 | Method | Params | Result |
@@ -133,6 +135,7 @@ Session: {"id":"$3","name":"h-api-1","harnessName":"","managed":true,"cwd":"/hom
 | `sessions.create` | `host`, `dir` (optional, `~` allowed, default home), `name` (optional), `command` (`"shell"` default or `"claude"`), `runAs` (optional Unix user name; the session's shell runs `sudo -iu <user>` then cds to `dir` (interpreted as that user, `~` is their home) and, for `command: "claude"`, starts Claude with the status hooks attached (§5.2); sudo asks for a password in the terminal if it needs one. Invalid names are `bad_request`.) | `Session` |
 | `sessions.kill` | `host`, `session` | `null` |
 | `sessions.rename` | `host`, `session`, `name` (`""` clears it) | `null`. Sets the display name only. |
+| `sessions.setColor` | `host`, `session`, `color` (one of the colour names above; `""` clears it) | `null`. Sets the colour tag, stored in the tmux session option `@harness_color` so every client sees it. Any other value is `bad_request`. |
 
 Event `hosts.changed`, pushed on connect and whenever any host's info or the
 set of hosts changes: `{"type":"event","event":"hosts.changed","hosts":[Host]}`.

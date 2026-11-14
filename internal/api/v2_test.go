@@ -106,6 +106,10 @@ func (b *fakeBackend) Rename(_ context.Context, id, name string) error {
 	b.rec("rename " + id + "|" + name)
 	return b.err
 }
+func (b *fakeBackend) SetColor(_ context.Context, id, color string) error {
+	b.rec("color " + id + "|" + color)
+	return b.err
+}
 func (b *fakeBackend) Subscribe(fn func([]session.Session)) func() {
 	b.mu.Lock()
 	b.subFn = fn
@@ -210,9 +214,13 @@ func TestSessionsCRUD(t *testing.T) {
 	if m["type"] != "result" || m["id"] != float64(5) {
 		t.Fatal(m)
 	}
+	m = rpc(t, ctx, c, `{"type":"sessions.setColor","id":6,"host":"local","session":"$1","color":"blue"}`)
+	if m["type"] != "result" || m["id"] != float64(6) {
+		t.Fatal(m)
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if fmt.Sprint(b.calls) != "[list kill $1 rename $1|]" {
+	if fmt.Sprint(b.calls) != "[list kill $1 rename $1| color $1|blue]" {
 		t.Fatal(b.calls)
 	}
 }
@@ -245,6 +253,7 @@ func TestBadParams(t *testing.T) {
 		`{"type":"sessions.list","id":1,"host":""}`,
 		`{"type":"sessions.kill","id":1,"host":"local"}`,
 		`{"type":"sessions.rename","id":1,"host":"local"}`,
+		`{"type":"sessions.setColor","id":1,"host":"local","color":"red"}`,
 		`{"type":"sessions.list","id":1,"host":5}`,
 		`{"type":"term.attach","id":1,"host":"local","session":"$1","cols":0,"rows":5}`,
 		`{"type":"term.attach","id":1,"host":"local","session":"$1","cols":1001,"rows":5}`,
