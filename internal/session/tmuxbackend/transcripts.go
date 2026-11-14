@@ -82,9 +82,7 @@ func transcriptScript(dir string, known map[string]int64) string {
 export LC_ALL
 d=` + tmux.ShellQuote(dir) + `
 [ -d "$d" ] || exit 0
-known=$(cat <<'HARNESS_KNOWN_EOF'
-` + kb.String() + `HARNESS_KNOWN_EOF
-)
+known=` + tmux.ShellQuote(kb.String()) + `
 find "$d" -type f -name '*.jsonl' 2>/dev/null | while IFS= read -r f; do
 	case $f in *'	'*) continue ;; esac
 	size=$(wc -c < "$f" 2>/dev/null) || continue

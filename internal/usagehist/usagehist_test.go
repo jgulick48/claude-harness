@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -87,7 +88,7 @@ func TestDedupeAcrossChunksAndOffsets(t *testing.T) {
 		t.Fatalf("after reload: %+v", res.Buckets)
 	}
 	fi, err := os.Stat(filepath.Join(dir, "h.json"))
-	if err != nil || fi.Mode().Perm() != 0o600 {
+	if err != nil || runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
 		t.Errorf("file: %v %v", fi, err)
 	}
 }
