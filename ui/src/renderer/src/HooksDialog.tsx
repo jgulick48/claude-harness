@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useCore } from './CoreContext'
 import type { Host } from './sessions'
 
-export type HooksMode = 'install' | 'update' | 'remove'
+/** 'usage': hooks are already installed; the dialog adds usage recording. */
+export type HooksMode = 'install' | 'update' | 'remove' | 'usage'
 
 /** Confirm dialog for installing, updating or removing the Claude status hooks on a host. */
 export function HooksDialog({
@@ -18,13 +19,14 @@ export function HooksDialog({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const remove = mode === 'remove'
+  const [usage, setUsage] = useState(true)
 
   const run = (): void => {
     if (!client) return
     setBusy(true)
     setError(null)
     client
-      .request(remove ? 'hosts.removeHooks' : 'hosts.installHooks', { host: host.id })
+      .request(remove ? 'hosts.removeHooks' : 'hosts.installHooks', remove ? { host: host.id } : { host: host.id, usage })
       .then(onClose)
       .catch((e: Error) => {
         setBusy(false)
@@ -51,7 +53,11 @@ export function HooksDialog({
           </>
         ) : (
           <>
-            <h2>{mode === 'update' ? 'Update' : 'Install'} Claude status hooks on {host.name}?</h2>
+            <h2>
+              {mode === 'usage'
+                ? `Record Claude usage on ${host.name}?`
+                : `${mode === 'update' ? 'Update' : 'Install'} Claude status hooks on ${host.name}?`}
+            </h2>
             <p className="help">This lets the app show whether Claude is working, waiting or idle in each session. On that host it will:</p>
             <ul className="hooks-list">
               <li>
@@ -65,6 +71,14 @@ export function HooksDialog({
             <p className="help">
               The hooks never affect Claude: the script always exits successfully and prints nothing. You can remove
               them at any time.
+            </p>
+            <label className="usage-check">
+              <input type="checkbox" checked={usage} disabled={busy} onChange={(e) => setUsage(e.target.checked)} />
+              <span>Also record Claude usage (plan limits, cost, context)</span>
+            </label>
+            <p className="help">
+              Adds a status line command that saves what Claude shows its status line, then runs your own status line
+              unchanged. Your current status line is restored when this is turned off.
             </p>
           </>
         )}

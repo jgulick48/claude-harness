@@ -62,6 +62,8 @@ type Backend struct {
 	sweeping    bool      // a status-file sweep is running
 	lastSweep   time.Time // when the last sweep started
 
+	usage usageCache // Claude usage readings (usage.go)
+
 	hostMu    sync.Mutex
 	hostCache session.Host
 	hostAt    time.Time
@@ -209,13 +211,11 @@ func (b *Backend) Host(ctx context.Context) session.Host {
 		}
 	}
 	if h.State == session.HostConnected {
-		if hi, ok := any(b).(session.HookInstaller); ok {
-			st, err := hi.HooksStatus(ctx)
-			if err != nil || st == "" {
-				st = session.HooksUnknown
-			}
-			h.ClaudeHooks = st
+		hooks, usage, err := b.hookStatuses(ctx)
+		if err != nil || hooks == "" {
+			hooks, usage = session.HooksUnknown, session.HooksUnknown
 		}
+		h.ClaudeHooks, h.ClaudeUsage = hooks, usage
 	}
 	if ctx.Err() == nil { // don't cache a probe that was cut short
 		b.hostCache, b.hostAt = h, time.Now()
@@ -339,6 +339,7 @@ func (b *Backend) List(ctx context.Context) ([]session.Session, error) {
 		}
 	}
 	b.applyFileStatus(ctx, list, statusFiles, panes)
+	b.applyUsage(ctx, list)
 	b.maybeSweepStatusFiles(statusFiles)
 	sort.SliceStable(list, func(i, j int) bool { return list[i].Created < list[j].Created })
 	return list, nil

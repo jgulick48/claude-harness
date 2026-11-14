@@ -17,8 +17,8 @@ type hookBackend struct {
 }
 
 func (h *hookBackend) HooksStatus(context.Context) (string, error) { return session.HooksMissing, nil }
-func (h *hookBackend) InstallHooks(context.Context) error {
-	h.rec("install")
+func (h *hookBackend) InstallHooks(_ context.Context, usage bool) error {
+	h.rec(fmt.Sprintf("install usage=%v", usage))
 	return h.installErr
 }
 func (h *hookBackend) RemoveHooks(context.Context) error {
@@ -55,11 +55,29 @@ func TestHooksMethods(t *testing.T) {
 			t.Fatalf("%s: %v", m, r)
 		}
 	}
-	if got := hb.calls; len(got) != 2 || got[0] != "install" || got[1] != "remove" {
-		t.Fatalf("calls %v", got)
+	if got := hb.calls; len(got) != 2 || got[0] != "install usage=true" || got[1] != "remove" {
+		t.Fatalf("calls %v", got) // usage defaults to true
 	}
 	wantErr(t, run(`{"type":"hosts.installHooks","id":3}`), "bad_request")
 	wantErr(t, run(`{"type":"hosts.removeHooks","id":4,"host":"nope"}`), "not_found")
+}
+
+func TestHooksUsageParam(t *testing.T) {
+	hb := &hookBackend{fakeBackend: newFakeBackend()}
+	_, run := hookConnect(t, hb)
+	for i, p := range []string{`"usage":false`, `"usage":true`, `"usage":null`} {
+		r := run(fmt.Sprintf(`{"type":"hosts.installHooks","id":%d,"host":"local",%s}`, i+1, p))
+		if r["type"] != "result" {
+			t.Fatalf("%s: %v", p, r)
+		}
+	}
+	for i, p := range []string{`"usage":"yes"`, `"usage":1`, `"usage":{}`} {
+		wantErr(t, run(fmt.Sprintf(`{"type":"hosts.installHooks","id":%d,"host":"local",%s}`, i+10, p)), "bad_request")
+	}
+	want := []string{"install usage=false", "install usage=true", "install usage=true"}
+	if got := hb.calls; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("calls %v, want %v", got, want)
+	}
 }
 
 func TestHooksNotSupported(t *testing.T) {

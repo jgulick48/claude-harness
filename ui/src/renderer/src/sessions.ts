@@ -28,6 +28,8 @@ export interface Host {
   tmuxVersion?: string
   /** Whether the Claude status hooks are installed; absent until checked. */
   claudeHooks?: ClaudeHooks
+  /** Whether the status line wrapper that records Claude usage is installed; absent until checked. */
+  claudeUsage?: ClaudeHooks
 }
 
 export type ClaudeHooks = 'installed' | 'outdated' | 'missing' | 'unknown'
@@ -130,6 +132,35 @@ export interface Session {
   claudeStatusAt?: number
   /** Unix user the session's shell runs as (via sudo); omitted for the login user. */
   runAs?: string
+  /** Latest Claude usage reading; present only while Claude runs in the session. */
+  usage?: SessionUsage
+}
+
+/** One rate-limit window; `resetsAt` is unix seconds. */
+export interface UsageWindow {
+  usedPct: number
+  resetsAt: number
+}
+
+export interface SpendWindow extends UsageWindow {
+  usedUsd?: number
+  limitUsd?: number
+  period?: string
+}
+
+export interface UsageLimits {
+  fiveHour?: UsageWindow
+  sevenDay?: UsageWindow
+  spend?: SpendWindow
+}
+
+/** Protocol §5.4. Everything except `at` (unix seconds) is optional. */
+export interface SessionUsage {
+  at: number
+  model?: string
+  costUsd?: number
+  contextPct?: number
+  limits?: UsageLimits
 }
 
 function basename(p: string): string {

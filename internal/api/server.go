@@ -393,6 +393,7 @@ type params struct {
 	Rows        json.RawMessage `json:"rows"`
 	Stream      json.RawMessage `json:"stream"`
 	Prefix      string          `json:"prefix"`
+	Usage       json.RawMessage `json:"usage"`
 }
 
 var methods = map[string]bool{

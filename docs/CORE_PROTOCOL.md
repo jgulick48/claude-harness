@@ -103,7 +103,9 @@ Host:    {"id":"local","name":"This computer","kind":"local","state":"connected"
          ("error" carries the reason for disconnected / unavailable / error;
           "retryAt" (unix ms) is set while disconnected with an automatic retry scheduled;
           "claudeHooks": "installed" | "outdated" | "missing" | "unknown", whether the
-          Claude status hooks are installed on that host, omitted until checked)
+          Claude status hooks are installed on that host, omitted until checked;
+          "claudeUsage": same values, whether the status line wrapper that records
+          Claude usage is installed (§5.4))
 Session: {"id":"$3","name":"h-api-1","harnessName":"","managed":true,"cwd":"/home/me/work/api",
           "windows":1,"attached":0,"created":1794420293,
           "claudeStatus":"waiting","claudeStatusAt":1794420400,"runAs":"bob"}
@@ -112,6 +114,8 @@ Session: {"id":"$3","name":"h-api-1","harnessName":"","managed":true,"cwd":"/hom
          options (§5.2).
          claudeStatus: "working" | "waiting" | "idle" | "unknown" | "" (Claude not running);
          see §5.2
+         usage: Claude's latest usage reading (§5.4); present only while Claude runs
+         in a non-run-as session and a reading exists
 ```
 
 | Method | Params | Result |
@@ -121,8 +125,8 @@ Session: {"id":"$3","name":"h-api-1","harnessName":"","managed":true,"cwd":"/hom
 | `hosts.remove` | `host` | `null`. Disconnects and forgets the host. Its tmux sessions keep running there. `local` can't be removed. |
 | `hosts.connect` | `host` | `null`. Reconnects a host that is `disconnected` or in `error`. |
 | `hosts.configHosts` | none | `[ConfigHost]`: concrete `Host` entries from `~/.ssh/config` (wildcard patterns skipped), each `{"alias","hostName","user","port","added"}`. `added` is true when a saved host already uses that alias as its target. |
-| `hosts.installHooks` | `host` | `null`. Installs the Claude status hooks on the host (§5.2) after backing up its settings file. Idempotent. The host's `claudeHooks` updates via `hosts.changed`. |
-| `hosts.removeHooks` | `host` | `null`. Removes only our hook entries and script. Idempotent. |
+| `hosts.installHooks` | `host`, `usage` (optional boolean, default `true`) | `null`. Installs the Claude status hooks on the host (§5.2) after backing up its settings file. With `usage` true it also installs the status line wrapper that records Claude usage (§5.4); with `usage: false` it removes that wrapper and restores the user's own status line. A non-boolean `usage` is `bad_request`. Idempotent. The host's `claudeHooks` and `claudeUsage` update via `hosts.changed`. |
+| `hosts.removeHooks` | `host` | `null`. Removes only our hook entries, our status line wrapper (restoring the user's own status line) and their files. Idempotent. |
 | `hosts.check` | `host` | `HostReport` (§5.3). A read-only setup check of the host. It changes nothing there. |
 | `hosts.trustKey` | `host`, `fingerprint` | `null`. Adds the pending host key to `~/.ssh/known_hosts` and reconnects. `fingerprint` must match `hostKey.fingerprint`; this guards against a key changing between the prompt and the click. |
 | `sessions.list` | `host` | `[Session]` |
@@ -240,6 +244,57 @@ Items, in this order. An item is omitted when it doesn't apply.
 | `claude` | `claude` is on the PATH of a login shell (located only, never run) | `warn` if not found |
 | `config` | The Claude Code config dir (`$CLAUDE_CONFIG_DIR` or `~/.claude`) and whether `settings.json` is valid JSON | `warn` if `settings.json` is invalid; a missing file is ok |
 | `hooks` | Claude status hooks: installed, outdated or missing | `warn` if missing or outdated, with the fix "Use Install… in the sidebar" |
+
+### 5.4 Claude usage
+
+Claude Code passes a JSON object on stdin to its **status line command**,
+including model, cost, context window and, for Pro/Max/Ultra subscribers (or a
+gateway), the rate limits. Hooks don't get these, so with `usage` enabled
+`hosts.installHooks` installs a wrapper as the status line command.
+
+- **Wrapper.** `<config dir>/claude-harness/statusline.sh` (POSIX sh, header
+  `# claude-harness-statusline v1`), registered as `statusLine.command`
+  (`sh '<path>'`); other `statusLine` keys such as `padding` are kept. When
+  `$TMUX` and `$TMUX_PANE` are set it writes one line
+  `<unix seconds>\t<the JSON on one line>` atomically to
+  `<config dir>/claude-harness/usage/<tmux server pid>-<pane number>`, with all
+  its own output discarded, then runs the user's original command with the same
+  input and passes its stdout and exit status through. Nothing from the
+  recording reaches stdout, which Claude displays.
+- **Original command.** The user's existing `statusLine.command` is saved in
+  `<config dir>/claude-harness/statusline-orig` (mode 0600) before settings are
+  changed; the file is absent when there was none. Reinstalling never
+  overwrites it with our own command. Uninstalling (`usage: false` or
+  `hosts.removeHooks`) restores that command (or deletes `statusLine` when there
+  was none) and removes the wrapper, `statusline-orig` and the `usage/` files
+  (the latter best effort, through a shell command on the host). A `statusLine`
+  that isn't an object makes the install fail with `bad_request`, nothing
+  written. Hooks and status line are merged into settings in one write after
+  one backup.
+- **Reading.** `sessions.list` polls read the files at most every 10 seconds
+  per host, one `tmux list-panes -a` and one shell command per read (skipped
+  while no session runs Claude). Files not modified for a day are deleted;
+  only regular files named `<digits>-<digits>` of this tmux server's pid count.
+  Unparseable lines are ignored. Windows whose `resets_at` has passed are
+  dropped and percentages are clamped to 0-100. Between reads the last readings
+  are re-applied, so a session keeps its `usage`.
+- **Pick rule.** Per session: the reading of the active pane of the active
+  window if it has one, else the newest reading among the session's panes.
+- **`Session.usage`** (omitted when absent), set only while `claudeStatus` is
+  not `""`, and not for run-as sessions (phase 1):
+
+```json
+{"at":1794420400,"model":"Opus","costUsd":0.0123,"contextPct":42.5,
+ "limits":{"fiveHour":{"usedPct":23.5,"resetsAt":1794424000},
+           "sevenDay":{"usedPct":41.2,"resetsAt":1794857600},
+           "spend":{"usedPct":62.8,"resetsAt":1797000000,"usedUsd":314.12,"limitUsd":500,"period":"monthly"}}}
+```
+
+`at` is when the wrapper last ran (unix seconds). Everything but `at` is
+optional; `limits` is omitted when no window is left, and each window needs both
+`used_percentage` and `resets_at` to be reported. The rate limits belong to the
+account, not the session, so the UI shows the newest reading (largest `at`) of
+a host's sessions as that host's limits.
 
 ### 5.1 Directory suggestions
 
