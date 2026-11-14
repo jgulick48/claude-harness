@@ -3,6 +3,7 @@ import {
   clampWidth,
   moveNav,
   navRefs,
+  nextWaiting,
   nthRef,
   SIDEBAR_DEFAULT,
   SIDEBAR_MAX,
@@ -75,6 +76,43 @@ describe('shortcutFor', () => {
     expect(shortcutFor(k('k', { ctrlKey: true, shiftKey: true }))).toBeNull()
     expect(shortcutFor(k('1', { ctrlKey: true, altKey: true }))).toBeNull()
     expect(shortcutFor(k('0', { ctrlKey: true }))).toBeNull()
+  })
+  it('Shift+J is next waiting; plain J and Alt+Shift+J are not', () => {
+    expect(shortcutFor(k('J', { ctrlKey: true, shiftKey: true }))).toEqual({ kind: 'nextWaiting' })
+    expect(shortcutFor(k('J', { metaKey: true, shiftKey: true }))).toEqual({ kind: 'nextWaiting' })
+    expect(shortcutFor(k('j', { ctrlKey: true }))).toBeNull()
+    expect(shortcutFor(k('J', { ctrlKey: true, shiftKey: true, altKey: true }))).toBeNull()
+  })
+})
+
+describe('nextWaiting', () => {
+  const r = (host: string, session: string) => ({ host, session })
+  const a = { ref: r('h1', 'a'), since: 300 }
+  const b = { ref: r('h1', 'b'), since: 100 }
+  const c = { ref: r('h2', 'c'), since: 200 }
+  it('is null when nothing waits', () => {
+    expect(nextWaiting([], null)).toBeNull()
+    expect(nextWaiting([], r('h1', 'a'))).toBeNull()
+  })
+  it('starts at the longest-waiting session across hosts', () => {
+    expect(nextWaiting([a, b, c], null)).toEqual(r('h1', 'b'))
+    expect(nextWaiting([a, b, c], r('h9', 'x'))).toEqual(r('h1', 'b'))
+  })
+  it('moves on from the current one and wraps around', () => {
+    expect(nextWaiting([a, b, c], r('h1', 'b'))).toEqual(r('h2', 'c'))
+    expect(nextWaiting([a, b, c], r('h2', 'c'))).toEqual(r('h1', 'a'))
+    expect(nextWaiting([a, b, c], r('h1', 'a'))).toEqual(r('h1', 'b'))
+  })
+  it('returns the current session when it is the only one waiting', () => {
+    expect(nextWaiting([a], r('h1', 'a'))).toEqual(r('h1', 'a'))
+  })
+  it('puts unknown times last and keeps sidebar order for ties', () => {
+    const u = { ref: r('h1', 'u') }
+    const t1 = { ref: r('h1', 't1'), since: 50 }
+    const t2 = { ref: r('h2', 't2'), since: 50 }
+    expect(nextWaiting([u, t2, t1], null)).toEqual(r('h2', 't2'))
+    expect(nextWaiting([u, t2, t1], r('h2', 't2'))).toEqual(r('h1', 't1'))
+    expect(nextWaiting([u, t2, t1], r('h1', 't1'))).toEqual(r('h1', 'u'))
   })
 })
 
