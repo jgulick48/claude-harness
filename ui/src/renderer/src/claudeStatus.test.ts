@@ -12,6 +12,8 @@ import {
   notificationText,
   orderSessions,
   relativeTime,
+  stateAge,
+  statusText,
   statusInfo,
   statusTooltip,
   UNKNOWN_TOOLTIP
@@ -47,6 +49,33 @@ describe('relativeTime', () => {
   })
   it('never goes negative with clock skew', () => {
     expect(relativeTime(1_000_000 + 50, now)).toBe('just now')
+  })
+})
+
+describe('stateAge', () => {
+  const now = 1_000_000 * 1000
+  it('is empty under a minute, without a time, or in the future', () => {
+    expect(stateAge(undefined, now)).toBe('')
+    expect(stateAge(0, now)).toBe('')
+    expect(stateAge(1_000_000 - 59, now)).toBe('')
+    expect(stateAge(1_000_000 + 600, now)).toBe('')
+  })
+  it('counts minutes, hours and days', () => {
+    expect(stateAge(1_000_000 - 60, now)).toBe('1m')
+    expect(stateAge(1_000_000 - 59 * 60 - 59, now)).toBe('59m')
+    expect(stateAge(1_000_000 - 3600, now)).toBe('1h')
+    expect(stateAge(1_000_000 - 23 * 3600 - 3599, now)).toBe('23h')
+    expect(stateAge(1_000_000 - 2 * 86400, now)).toBe('2d')
+  })
+})
+
+describe('statusText', () => {
+  const now = 1_000_000 * 1000
+  it('adds the age to the label', () => {
+    expect(statusText({ claudeStatus: 'waiting', claudeStatusAt: 1_000_000 - 720 }, now)).toBe('Waiting 12m')
+    expect(statusText({ claudeStatus: 'working', claudeStatusAt: 1_000_000 - 10 }, now)).toBe('Working')
+    expect(statusText({ claudeStatus: 'unknown', claudeStatusAt: 1_000_000 - 720 }, now)).toBe('Unknown')
+    expect(statusText({ claudeStatus: '' }, now)).toBe('')
   })
 })
 

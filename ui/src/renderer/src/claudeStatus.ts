@@ -39,6 +39,29 @@ export function relativeTime(thenSec: number, nowMs: number): string {
   return `${Math.floor(hours / 24)}d ago`
 }
 
+/**
+ * How long a session has been in its state, compact for the row: "" under a
+ * minute (or with no time), else "12m", "3h", "2d". A time in the future
+ * (host clock ahead of ours) counts as "".
+ */
+export function stateAge(atSec: number | undefined, nowMs: number): string {
+  if (!atSec) return ''
+  const mins = Math.floor((nowMs / 1000 - atSec) / 60)
+  if (!(mins >= 1)) return ''
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h`
+  return `${Math.floor(hours / 24)}d`
+}
+
+/** "Waiting 12m"-style text for the rail tooltip; "" with no status. */
+export function statusText(s: Pick<Session, 'claudeStatus' | 'claudeStatusAt'>, nowMs: number): string {
+  const info = statusInfo(s)
+  if (!info) return ''
+  const age = info.status === 'unknown' ? '' : stateAge(s.claudeStatusAt, nowMs)
+  return age ? `${info.label} ${age}` : info.label
+}
+
 /** Tooltip for a status badge; empty when there is no status. */
 export function statusTooltip(s: Pick<Session, 'claudeStatus' | 'claudeStatusAt'>, nowMs: number): string {
   const info = statusInfo(s)
