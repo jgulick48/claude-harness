@@ -1017,7 +1017,9 @@ export function Sidebar(): React.JSX.Element {
       <footer className={statusIsError ? 'status-line error' : 'status-line'}>{status}</footer>
       {hostMenu && (
         <HostMenu
-          menu={hostMenu}
+          // The host's live state, not the copy taken when the menu opened:
+          // e.g. claudeUsage changes a moment after "Stop recording".
+          menu={{ ...hostMenu, host: state.hosts.find((h) => h.id === hostMenu.host.id) ?? hostMenu.host }}
           onChange={setHostMenu}
           onClose={() => setHostMenu(null)}
           onReconnect={() => {
