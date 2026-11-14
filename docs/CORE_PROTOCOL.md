@@ -108,7 +108,12 @@ Host:    {"id":"local","name":"This computer","kind":"local","state":"connected"
           Claude usage is installed (§5.4))
 Session: {"id":"$3","name":"h-api-1","harnessName":"","managed":true,"cwd":"/home/me/work/api",
           "windows":1,"attached":0,"created":1794420293,
-          "claudeStatus":"waiting","claudeStatusAt":1794420400,"runAs":"bob"}
+          "claudeStatus":"waiting","claudeStatusAt":1794420400,"runAs":"bob",
+          "gitBranch":"feat/x"}
+         gitBranch: the git branch checked out in cwd; omitted when cwd isn't a
+         repo, HEAD is detached, the session is a run-as one, or it hasn't been
+         looked up yet. Core refreshes it at most every 30 s per host (one
+         batched command); a directory not seen before is looked up right away.
          runAs: the user the session switched to; omitted when not set.
          A run-as session reports Claude status through a status file, not the tmux
          options (§5.2).

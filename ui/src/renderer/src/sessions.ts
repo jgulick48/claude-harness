@@ -131,6 +131,8 @@ export interface Session {
   harnessName: string
   managed: boolean
   cwd: string
+  /** Git branch of cwd; absent when not a repo, detached, run-as, or not looked up yet. */
+  gitBranch?: string
   windows: number
   attached: number
   created: number

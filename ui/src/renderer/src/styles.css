@@ -259,6 +259,16 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.row-branch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.row-branch svg { flex: none; }
+.row-branch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag {
   flex: none;
   font-size: 10px;

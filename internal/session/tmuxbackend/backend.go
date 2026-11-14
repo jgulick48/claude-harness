@@ -62,7 +62,8 @@ type Backend struct {
 	sweeping    bool      // a status-file sweep is running
 	lastSweep   time.Time // when the last sweep started
 
-	usage usageCache // Claude usage readings (usage.go)
+	usage  usageCache  // Claude usage readings (usage.go)
+	branch branchCache // git branch per directory (branch.go)
 
 	hostMu    sync.Mutex
 	hostCache session.Host
@@ -343,6 +344,7 @@ func (b *Backend) List(ctx context.Context) ([]session.Session, error) {
 	}
 	b.applyFileStatus(ctx, list, statusFiles, panes)
 	b.applyUsage(ctx, list)
+	b.applyBranches(ctx, list)
 	b.maybeSweepStatusFiles(statusFiles)
 	sort.SliceStable(list, func(i, j int) bool { return list[i].Created < list[j].Created })
 	return list, nil

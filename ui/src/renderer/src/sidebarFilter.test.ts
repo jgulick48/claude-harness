@@ -22,6 +22,21 @@ describe('fuzzyMatch', () => {
   })
 })
 
+describe('matchCandidate branch', () => {
+  const c = { label: 'api', path: '~/work/api', host: 'devbox', branch: 'Feat/Login-Fix' }
+  it('matches the branch case-insensitively, as a substring', () => {
+    expect(matchCandidate('feat/login', c)).not.toBeNull()
+    expect(matchCandidate('LOGIN', c)).not.toBeNull()
+    expect(matchCandidate('login api', c)).not.toBeNull()
+  })
+  it('does not match a missing or different branch and leaves label highlights alone', () => {
+    expect(matchCandidate('login', { ...c, branch: undefined })).toBeNull()
+    expect(matchCandidate('login', { ...c, branch: '' })).toBeNull()
+    expect(matchCandidate('zzz', c)).toBeNull()
+    expect(matchCandidate('login', c)?.labelIndices).toEqual([])
+  })
+})
+
 describe('matchCandidate colour', () => {
   const c = { label: 'api', path: '~/work/api', host: 'devbox', color: 'green' }
   it('matches the colour name by prefix', () => {
