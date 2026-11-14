@@ -86,7 +86,8 @@ exactly one reply with the same `id`: either
 
 Error codes: `bad_request`, `not_found` (unknown host/session/stream),
 `unavailable` (host can't run tmux), `busy` (the session can't take a prompt
-right now, see `sessions.sendPrompt`), `internal`.
+right now, see `sessions.sendPrompt`), `unsupported` (the host can't do this and
+retrying won't help, see `hosts.load`), `internal`.
 
 ### 4.3 Events
 
@@ -356,6 +357,33 @@ Token usage from Claude's transcripts on the host (`<config dir>/projects/**/*.j
   error.
 - **Not included:** run-as accounts. Their transcripts live in other users' homes; only the login
   user's config dir is read.
+
+Additive: no protocol version change.
+
+### 5.5 Host load
+
+| Method | Params | Result |
+|---|---|---|
+| `hosts.load` | `host` | `{"at":1794701234567,"cpuPct":23.4,"cores":8,"load1":0.52,"load5":0.61,"load15":0.7,"memTotal":16716554240,"memUsed":6553600000}` |
+
+One reading of the host's CPU and memory load, taken with a single batched shell command on the host
+(over SSH for SSH hosts). The UI polls it every 5 s per host while a host's "Show CPU and memory" is on
+and the app is visible; core keeps no history.
+
+- **Fields.** `at` is unix milliseconds on the core's clock. `cpuPct` is 0-100, or `null` when there is
+  no earlier sample to compare with. `cores` is the logical CPU count. `load1`, `load5`, `load15` are
+  the load averages. `memTotal` and `memUsed` are bytes.
+- **Linux.** Load is `/proc/loadavg`, cores `nproc` (else the `processor` lines of `/proc/cpuinfo`),
+  `memUsed` is `MemTotal - MemAvailable` from `/proc/meminfo`. `cpuPct` is
+  `100 x (1 - delta idle / delta total)` over the aggregate `cpu` line of `/proc/stat` (idle = idle +
+  iowait) between this reading and the previous one core took for that host. The first reading, a
+  counter that went backwards, and a reading less than 1 s after the baseline give `null`
+  (the older baseline is kept in the last case).
+- **macOS.** Cores and memory total from `sysctl hw.ncpu hw.memsize`, load from `vm.loadavg`,
+  `memUsed` = (active + wired + occupied by compressor) pages x page size from `vm_stat`. `cpuPct` is
+  the sum of `ps -A -o %cpu` divided by the core count, capped at 100; it needs no earlier sample.
+- **Other OSes** (and hosts whose backend can't read load) fail with `unsupported`; a host that is not
+  connected fails with `unavailable`. A reading that can't be parsed is `internal`.
 
 Additive: no protocol version change.
 

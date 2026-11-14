@@ -8,6 +8,8 @@ import { UsageDialog } from './UsageDialog'
 import { SendPromptDialog } from './SendPromptDialog'
 import { keysWithStatus, pruneSelection, selKey, type PromptCandidate } from './sendPrompt'
 import { UsageIndicator } from './UsageIndicator'
+import { HostLoadIndicator } from './HostLoadIndicator'
+import { loadLoadHosts, saveLoadHosts } from './hostLoad'
 import { canRecordUsage, canStopUsage } from './usage'
 import { canRunCheckFromStatus } from './hostCheck'
 import { StatusBadge } from './StatusBadge'
@@ -103,6 +105,9 @@ function HostMenu({
   onRemoveHooks,
   onRecordUsage,
   onStopUsage,
+  showLoad,
+  loadOn,
+  onToggleLoad,
   onClose
 }: {
   menu: HostMenuState
@@ -113,6 +118,10 @@ function HostMenu({
   onRemoveHooks: () => void
   onRecordUsage: () => void
   onStopUsage: () => void
+  /** The host can show load (not known to be unsupported). */
+  showLoad: boolean
+  loadOn: boolean
+  onToggleLoad: () => void
   onClose: () => void
 }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
@@ -154,6 +163,11 @@ function HostMenu({
           {canStopUsage(menu.host) && (
             <button className="ctx-item" role="menuitem" onClick={onStopUsage}>
               Stop recording Claude usage
+            </button>
+          )}
+          {showLoad && (
+            <button className="ctx-item" role="menuitemcheckbox" aria-checked={loadOn} onClick={onToggleLoad}>
+              Show CPU and memory
             </button>
           )}
           {canRemoveHooks(menu.host) && (
@@ -498,6 +512,16 @@ export function Sidebar(): React.JSX.Element {
   const [hooksDismissed, setHooksDismissed] = useState<Set<string>>(new Set())
   const [checkHost, setCheckHost] = useState<Host | null>(null)
   const [usageOpen, setUsageOpen] = useState(false)
+  // Hosts showing CPU and memory (persisted), and hosts whose OS the core can't read (this session).
+  const [loadHosts, setLoadHosts] = useState(() => loadLoadHosts())
+  const [loadUnsupported, setLoadUnsupported] = useState<Set<string>>(new Set())
+  const toggleLoad = (id: string): void =>
+    setLoadHosts((cur) => {
+      const next = new Set(cur)
+      if (!next.delete(id)) next.add(id)
+      saveLoadHosts(next)
+      return next
+    })
   // Multi-select for "Send prompt…": keys from selKey. promptFor is the
   // selection the open dialog works on.
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
@@ -889,6 +913,14 @@ export function Sidebar(): React.JSX.Element {
               {ok && !rail && (
                 <UsageIndicator hostId={host.id} sessions={sessions} onOpen={() => setUsageOpen(true)} />
               )}
+              {ok && !rail && loadHosts.has(host.id) && !loadUnsupported.has(host.id) && (
+                <HostLoadIndicator
+                  hostId={host.id}
+                  hostName={host.name}
+                  client={client}
+                  onUnsupported={() => setLoadUnsupported((cur) => new Set(cur).add(host.id))}
+                />
+              )}
               {ok && notice && !hooksDismissed.has(host.id) && (
                 <div className="hooks-notice" role="status">
                   <span>
@@ -1130,6 +1162,13 @@ export function Sidebar(): React.JSX.Element {
             const h = hostMenu.host
             setHostMenu(null)
             if (client) act(client.request('hosts.installHooks', { host: h.id, usage: false }))
+          }}
+          showLoad={!loadUnsupported.has(hostMenu.host.id)}
+          loadOn={loadHosts.has(hostMenu.host.id)}
+          onToggleLoad={() => {
+            const h = hostMenu.host
+            setHostMenu(null)
+            toggleLoad(h.id)
           }}
           onRemove={() => {
             const h = hostMenu.host

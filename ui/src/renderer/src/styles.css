@@ -574,6 +574,13 @@ body {
 .usage-fill.warn { background: var(--warn); }
 .usage-fill.high { background: var(--error); }
 .sidebar.rail .usage-ind { display: none; }
+.load-ind { margin: 0 0 2px; padding: 2px 0 2px 14px; display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: var(--fg-muted); }
+.load-ind.stale { opacity: 0.7; }
+.load-ind.muted { font-style: italic; }
+.load-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.load-key { flex: none; width: 24px; }
+.load-text { flex: none; min-width: 7ch; text-align: right; font-variant-numeric: tabular-nums; }
+.sidebar.rail .load-ind { display: none; }
 .usage-dialog { width: min(680px, 94vw); max-height: 88vh; overflow: auto; }
 .usage-host h3 { margin: 8px 0 4px; font-size: 14px; }
 .usage-install { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; font-size: 13px; }
