@@ -11,7 +11,7 @@ and reviews, Haiku runs the mechanical steps.
 | # | Feature | Size | Branch |
 |---|---|---|---|
 | 1 | ~~[Status of a crashed Claude (run-as)](#1-status-of-a-crashed-claude-in-run-as-sessions)~~ (done, 0.9.4) | S–M | `fix/runas-stale-status` |
-| 2 | [Jump to the next waiting session](#2-jump-to-the-next-waiting-session) | S | `feature/next-waiting` |
+| 2 | ~~[Jump to the next waiting session](#2-jump-to-the-next-waiting-session)~~ (done, 0.9.5) | S | `feature/next-waiting` |
 | 3 | [Time in state in the sidebar](#3-time-in-state-and-git-branch-in-the-sidebar) | S | `feature/status-age` |
 | 4 | [Find in terminal](#4-find-in-terminal) | S–M | `feature/terminal-search` |
 | 5 | [Claude usage, phase 1: live limits](#5-claude-usage) | L | `feature/usage-live` |
@@ -62,6 +62,8 @@ expect `""` on the next list.
 **Models.** Sonnet implements; Opus reviews.
 
 ## 2. Jump to the next waiting session
+
+**Done in 0.9.5.**
 
 **What.** A shortcut (proposed: Ctrl/Cmd+Shift+J) that attaches the next
 session whose status is `waiting`, longest-waiting first, across all hosts.

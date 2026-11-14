@@ -276,6 +276,7 @@ body {
 }
 .ctx-item:hover, .ctx-item:focus-visible { background: var(--hover); outline: none; }
 .ctx-item.danger { color: var(--error); }
+.ctx-keys { float: right; margin-left: 24px; color: var(--fg-muted); }
 .ctx-confirm { padding: 4px 8px; font-size: 12px; color: var(--fg-muted); }
 
 .modal-backdrop {

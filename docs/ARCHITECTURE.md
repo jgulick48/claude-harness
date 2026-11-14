@@ -266,6 +266,9 @@ grouped by host. The terminal fills the rest of the window.
 - A filter box at the bottom (Cmd/Ctrl+K focuses it) fuzzy-matches session
   name, path, and host.
 - Keyboard: Up/Down to move, Enter to attach, Cmd/Ctrl+1…9 to jump.
+- Cmd/Ctrl+Shift+J (also in the settings menu) attaches the next session whose
+  Claude is waiting, across all hosts, longest-waiting first; pressing it again
+  moves on and wraps around. A toast says when none (or no other) is waiting.
 
 ### 5.2 New terminal dialog ([+])
 

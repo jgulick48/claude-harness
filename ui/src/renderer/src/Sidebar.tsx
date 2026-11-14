@@ -24,8 +24,10 @@ import {
   clampWidth,
   moveNav,
   navRefs,
+  nextWaiting,
   nthRef,
   RAIL_WIDTH,
+  sameRef,
   SIDEBAR_DEFAULT,
   SIDEBAR_MAX,
   SIDEBAR_MIN,
@@ -184,11 +186,14 @@ function TrustPanel({
   )
 }
 
+const IS_MAC = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform)
+
 function SettingsMenu({
   x,
   y,
   notify,
   onToggleNotify,
+  onNextWaiting,
   onAppearance,
   onClose
 }: {
@@ -196,6 +201,7 @@ function SettingsMenu({
   y: number
   notify: boolean
   onToggleNotify: () => void
+  onNextWaiting: () => void
   onAppearance: () => void
   onClose: () => void
 }): React.JSX.Element {
@@ -205,6 +211,9 @@ function SettingsMenu({
     <div className="ctx-menu" ref={ref} style={{ left: x, top: y }} role="menu">
       <button className="ctx-item" role="menuitemcheckbox" aria-checked={notify} autoFocus onClick={onToggleNotify}>
         {notify ? '✓ ' : ''}Notifications
+      </button>
+      <button className="ctx-item" role="menuitem" onClick={onNextWaiting}>
+        Next waiting session <span className="ctx-keys">{IS_MAC ? '⇧⌘J' : 'Ctrl+Shift+J'}</span>
       </button>
       <button className="ctx-item" role="menuitem" onClick={onAppearance}>
         Appearance…
@@ -464,12 +473,31 @@ export function Sidebar(): React.JSX.Element {
 
   // Global shortcuts. Capture phase + stopPropagation so they also work while
   // a terminal has focus without the keystroke reaching the shell.
-  const latest = useRef({ nav, toggleRail, attachRef })
-  latest.current = { nav, toggleRail, attachRef }
+  // Next waiting session: across all hosts, ignoring the filter and folds.
+  const goNextWaiting = (): void => {
+    const candidates = state.hosts.flatMap((h) =>
+      (state.sessions[h.id] ?? [])
+        .filter((s) => s.claudeStatus === 'waiting')
+        .map((s) => ({ ref: { host: h.id, session: s.id }, since: s.claudeStatusAt }))
+    )
+    const r = nextWaiting(candidates, state.active)
+    if (!r) dispatch({ type: 'notice', text: 'No sessions are waiting' })
+    else if (sameRef(r, state.active)) dispatch({ type: 'notice', text: 'No other session is waiting' })
+    else attachRef(r)
+  }
+  const latest = useRef({ nav, toggleRail, attachRef, goNextWaiting })
+  latest.current = { nav, toggleRail, attachRef, goNextWaiting }
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const sc = shortcutFor(e)
       if (!sc) return
+      if (sc.kind === 'nextWaiting') {
+        if (document.querySelector('[role="dialog"]')) return
+        e.preventDefault()
+        e.stopPropagation()
+        if (!e.repeat) latest.current.goNextWaiting()
+        return
+      }
       if (sc.kind === 'nth') {
         if (document.querySelector('[role="dialog"]')) return
         const r = nthRef(latest.current.nav, sc.n)
@@ -888,7 +916,7 @@ export function Sidebar(): React.JSX.Element {
           onKeyDown={onFilterKey}
         />
         <kbd className="filter-hint" aria-hidden="true">
-          {typeof navigator !== 'undefined' && /mac/i.test(navigator.platform) ? '⌘K' : 'Ctrl+K'}
+          {IS_MAC ? '⌘K' : 'Ctrl+K'}
         </kbd>
       </div>
       </>
@@ -942,6 +970,10 @@ export function Sidebar(): React.JSX.Element {
           x={settings.x}
           y={settings.y}
           notify={notify}
+          onNextWaiting={() => {
+            setSettings(null)
+            goNextWaiting()
+          }}
           onAppearance={() => {
             setSettings(null)
             openAppearance()

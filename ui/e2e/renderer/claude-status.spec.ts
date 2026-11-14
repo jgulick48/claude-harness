@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { expect, test, useEnv } from '../support/harness'
+import { expect, keys, test, useEnv } from '../support/harness'
 import { privateTmux } from '../support/isolated'
 
 // tmux has no Windows build; these scenarios drive a real local tmux.
@@ -40,6 +40,58 @@ test('Claude status shows in the row, title and dock badge', async ({ page }) =>
 
   tmux('set-option', '-t', 'cs', '@claude_status', 'idle')
   await expect(row).toContainText('Idle')
+})
+
+test('the next-waiting shortcut visits waiting sessions, longest-waiting first', async ({ page }) => {
+  const now = Math.floor(Date.now() / 1000)
+  // Three sessions running a non-shell process, named so their rows are easy to find.
+  for (const n of ['nw-a', 'nw-b', 'nw-c']) {
+    tmux('new-session', '-d', '-s', n, '-c', env().core.home)
+    tmux('set-option', '-t', n, '@harness_name', n)
+    tmux('send-keys', '-t', n, 'exec sleep 600', 'Enter')
+  }
+  const row = (n: string) => local(page).getByRole('button', { name: n, exact: false }).and(page.locator('[data-row]'))
+  for (const n of ['nw-a', 'nw-b', 'nw-c']) await expect(row(n)).toBeVisible()
+
+  // Nothing waiting yet: a toast says so and nothing is attached.
+  await page.locator('body').click()
+  await page.keyboard.press(keys.nextWaiting)
+  await expect(page.getByRole('status').filter({ hasText: 'No sessions are waiting' })).toBeVisible()
+
+  // c has waited longest, then a; b is working.
+  const wait = (n: string, at: number): void => {
+    tmux('set-option', '-t', n, '@claude_status', 'waiting')
+    tmux('set-option', '-t', n, '@claude_status_at', String(at))
+  }
+  wait('nw-c', now - 300)
+  wait('nw-a', now - 100)
+  tmux('set-option', '-t', 'nw-b', '@claude_status', 'working')
+  await expect(row('nw-c')).toContainText('Waiting')
+  await expect(row('nw-a')).toContainText('Waiting')
+
+  await page.keyboard.press(keys.nextWaiting)
+  await expect(row('nw-c')).toHaveAttribute('aria-current', 'true')
+  // The attached terminal takes focus; the shortcut must still work from there.
+  await expect(page.locator('.xterm-helper-textarea').first()).toBeFocused()
+  await page.keyboard.press(keys.nextWaiting)
+  await expect(row('nw-a')).toHaveAttribute('aria-current', 'true')
+  await page.keyboard.press(keys.nextWaiting) // wraps around
+  await expect(row('nw-c')).toHaveAttribute('aria-current', 'true')
+
+  // Once c is answered, only a is left; from a there is nowhere else to go.
+  tmux('set-option', '-t', 'nw-c', '@claude_status', 'working')
+  await expect(row('nw-c')).toContainText('Working')
+  await page.keyboard.press(keys.nextWaiting)
+  await expect(row('nw-a')).toHaveAttribute('aria-current', 'true')
+  await page.keyboard.press(keys.nextWaiting)
+  await expect(page.getByRole('status').filter({ hasText: 'No other session is waiting' })).toBeVisible()
+
+  // Also in the settings menu.
+  tmux('set-option', '-t', 'nw-c', '@claude_status', 'waiting')
+  await expect(row('nw-c')).toContainText('Waiting')
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('menuitem', { name: /Next waiting session/ }).click()
+  await expect(row('nw-c')).toHaveAttribute('aria-current', 'true')
 })
 
 test('installing the Claude status hooks writes only into the fixture config', async ({ page }) => {

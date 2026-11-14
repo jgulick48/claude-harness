@@ -78,6 +78,8 @@ export type Action =
   /** Replace the whole layout (a named layout was chosen). */
   | { type: 'setLayout'; layout: Layout }
   | { type: 'dismissNotice' }
+  /** Show a short message in the toast. */
+  | { type: 'notice'; text: string }
   | { type: 'openDialog'; host?: string }
   | { type: 'closeDialog' }
   | { type: 'openAddHost' }
@@ -125,6 +127,8 @@ export function reducer(state: AppState, a: Action): AppState {
       return withLayout(state, resizeDivider(state.layout, a.path, a.index, a.delta, a.base))
     case 'setLayout':
       return withLayout(state, reconcile(a.layout, state.hosts, state.sessions))
+    case 'notice':
+      return { ...state, notice: a.text }
     case 'dismissNotice':
       return state.notice ? { ...state, notice: null } : state
     case 'openDialog':

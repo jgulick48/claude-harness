@@ -92,6 +92,7 @@ const mod = isMac ? 'Meta' : 'Control'
 export const keys = {
   filter: `${mod}+k`,
   rail: `${mod}+b`,
+  nextWaiting: `${mod}+Shift+J`,
   jump: (n: number): string => `${mod}+${n}`,
   zoomIn: `${mod}+Equal`,
   zoomOut: `${mod}+Minus`,
