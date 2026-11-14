@@ -197,6 +197,11 @@ have the hooks installed. Instead:
   `sessions.list` poll and uses the file's state and time in place of the tmux
   options. A reported state wins over the active-pane check (the pane's command
   is `sudo`, or the wrapper shell where sudo doesn't use its own pty); an empty file falls back to `unknown`/`""` as above.
+  A reported state only counts while a `claude` process runs under one of the
+  session's panes (checked with one `ps` in the same exec that reads the
+  files); when none does, because Claude was killed without `SessionEnd`, the
+  session reports `""`. The check is skipped when `ps` can't see other users'
+  processes (e.g. `hidepid`).
   Core removes the file when the session is killed. Files of sessions that
   ended some other way (the user exited the shell, the tmux server died) are
   swept: at most every 10 minutes, after a successful list, core deletes status
