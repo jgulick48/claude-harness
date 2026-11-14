@@ -34,12 +34,12 @@ func (h *sshHost) HooksStatus(ctx context.Context) (string, error) {
 
 // InstallHooks delegates to the current inner backend, then tells subscribers
 // (hosts.changed) that the host's hook state may have changed.
-func (h *sshHost) InstallHooks(ctx context.Context) error {
+func (h *sshHost) InstallHooks(ctx context.Context, usage bool) error {
 	hi, err := h.hookInstaller()
 	if err != nil {
 		return err
 	}
-	if err := hi.InstallHooks(ctx); err != nil {
+	if err := hi.InstallHooks(ctx, usage); err != nil {
 		return err
 	}
 	h.m.notify()

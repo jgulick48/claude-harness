@@ -29,7 +29,7 @@ func TestHooksEndToEnd(t *testing.T) {
 
 	b := newTestBackend(t)
 	ctx := context.Background()
-	if err := b.InstallHooks(ctx); err != nil {
+	if err := b.InstallHooks(ctx, true); err != nil {
 		t.Fatal(err)
 	}
 	if st, err := b.HooksStatus(ctx); err != nil || st != session.HooksInstalled {

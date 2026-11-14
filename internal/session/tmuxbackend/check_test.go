@@ -226,7 +226,7 @@ func TestCheckAllOK(t *testing.T) {
 	forBoth(t, func(t *testing.T, mk rigMaker) {
 		fake := filepath.Dir(fakeClaude(t))
 		r := mk(t, fake+":"+os.Getenv("PATH"), "/bin/sh")
-		if err := r.b.InstallHooks(context.Background()); err != nil {
+		if err := r.b.InstallHooks(context.Background(), true); err != nil {
 			t.Fatal(err)
 		}
 		rep, items := r.check(t)
@@ -374,7 +374,7 @@ func TestCheckHooks(t *testing.T) {
 		if it.Fix != "Use Install… in the sidebar" {
 			t.Errorf("%+v", it)
 		}
-		if err := r.b.InstallHooks(context.Background()); err != nil {
+		if err := r.b.InstallHooks(context.Background(), true); err != nil {
 			t.Fatal(err)
 		}
 		_, items = r.check(t)

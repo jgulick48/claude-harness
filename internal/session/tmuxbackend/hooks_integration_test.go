@@ -80,7 +80,7 @@ func hooksScenario(t *testing.T, b *Backend, cfg string) {
 	if st, err := b.HooksStatus(ctx); err != nil || st != session.HooksMissing {
 		t.Fatalf("initial status = %q, %v", st, err)
 	}
-	if err := b.InstallHooks(ctx); err != nil {
+	if err := b.InstallHooks(ctx, true); err != nil {
 		t.Fatal(err)
 	}
 	if st, _ := b.HooksStatus(ctx); st != session.HooksInstalled {
@@ -128,7 +128,7 @@ func hooksScenario(t *testing.T, b *Backend, cfg string) {
 	before := read(t, settings)
 	fi1, _ := os.Stat(settings)
 	time.Sleep(1100 * time.Millisecond)
-	if err := b.InstallHooks(ctx); err != nil {
+	if err := b.InstallHooks(ctx, true); err != nil {
 		t.Fatal(err)
 	}
 	fi2, _ := os.Stat(settings)
@@ -143,7 +143,7 @@ func hooksScenario(t *testing.T, b *Backend, cfg string) {
 	if st, _ := b.HooksStatus(ctx); st != session.HooksOutdated {
 		t.Errorf("stale script status = %q", st)
 	}
-	if err := b.InstallHooks(ctx); err != nil {
+	if err := b.InstallHooks(ctx, true); err != nil {
 		t.Fatal(err)
 	}
 	if st, _ := b.HooksStatus(ctx); st != session.HooksInstalled {
@@ -176,7 +176,7 @@ func hooksScenario(t *testing.T, b *Backend, cfg string) {
 		t.Fatal(err)
 	}
 	nb := len(backups(t, cfg))
-	for name, fn := range map[string]func(context.Context) error{"install": b.InstallHooks, "remove": b.RemoveHooks} {
+	for name, fn := range map[string]func(context.Context) error{"install": func(ctx context.Context) error { return b.InstallHooks(ctx, true) }, "remove": b.RemoveHooks} {
 		err := fn(ctx)
 		if !errors.Is(err, session.ErrBadRequest) || !strings.Contains(err.Error(), "settings.json") {
 			t.Errorf("%s on invalid JSON: %v", name, err)
@@ -210,7 +210,7 @@ func TestHooksLocalDefaultDir(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	b := NewLocal(Options{Home: home, Socket: "harness-hooks-unused", Config: "/dev/null", PollInterval: time.Hour})
 	t.Cleanup(func() { b.Close() })
-	if err := b.InstallHooks(context.Background()); err != nil {
+	if err := b.InstallHooks(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".claude", "claude-harness", "claude-status.sh")); err != nil {
@@ -239,7 +239,7 @@ func TestHooksSSHDefaultDir(t *testing.T) {
 	guardConfigDir(t, filepath.Join(r.home, ".claude"))
 	b := r.backend(r.dial(), Options{})
 	ctx := context.Background()
-	if err := b.InstallHooks(ctx); err != nil {
+	if err := b.InstallHooks(ctx, true); err != nil {
 		t.Fatal(err)
 	}
 	p := filepath.Join(r.home, ".claude", "claude-harness", "claude-status.sh")
@@ -267,7 +267,7 @@ func TestHooksSSHConnectionLost(t *testing.T) {
 		_, err := b.HooksStatus(context.Background())
 		return errors.Is(err, session.ErrUnavailable)
 	})
-	if err := b.InstallHooks(context.Background()); !errors.Is(err, session.ErrUnavailable) {
+	if err := b.InstallHooks(context.Background(), true); !errors.Is(err, session.ErrUnavailable) {
 		t.Errorf("install: %v", err)
 	}
 }

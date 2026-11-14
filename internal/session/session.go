@@ -61,6 +61,9 @@ type Host struct {
 	// ClaudeHooks reports whether the Claude status hooks are installed on
 	// this host (HooksInstalled etc.); "" when not checked yet.
 	ClaudeHooks string `json:"claudeHooks,omitempty"`
+	// ClaudeUsage reports whether the status line wrapper that records Claude
+	// usage is installed (HooksInstalled etc.); "" when not checked yet.
+	ClaudeUsage string `json:"claudeUsage,omitempty"`
 }
 
 // HostKeyPrompt describes an unknown SSH host key awaiting the user's decision.
@@ -86,6 +89,40 @@ type Session struct {
 	// last changed (unix seconds), 0 if unknown.
 	ClaudeStatus   string `json:"claudeStatus"`
 	ClaudeStatusAt int64  `json:"claudeStatusAt,omitempty"`
+	// Usage is Claude's latest status line reading for this session; set only
+	// while Claude runs there and not for run-as sessions.
+	Usage *Usage `json:"usage,omitempty"`
+}
+
+// Usage is one reading of the JSON Claude Code passes to its status line
+// command (docs/CORE_PROTOCOL.md §5.4).
+type Usage struct {
+	At         int64        `json:"at"`                   // unix seconds of the reading
+	Model      string       `json:"model,omitempty"`      // model.display_name
+	CostUSD    *float64     `json:"costUsd,omitempty"`    // cost.total_cost_usd
+	ContextPct *float64     `json:"contextPct,omitempty"` // context_window.used_percentage
+	Limits     *UsageLimits `json:"limits,omitempty"`
+}
+
+// UsageLimits are the subscription rate limit windows that have not reset yet.
+type UsageLimits struct {
+	FiveHour *UsageWindow `json:"fiveHour,omitempty"`
+	SevenDay *UsageWindow `json:"sevenDay,omitempty"`
+	Spend    *SpendWindow `json:"spend,omitempty"`
+}
+
+// UsageWindow is one rate limit window.
+type UsageWindow struct {
+	UsedPct  float64 `json:"usedPct"`  // 0-100
+	ResetsAt int64   `json:"resetsAt"` // unix seconds
+}
+
+// SpendWindow is the spend limit window, with its amounts when reported.
+type SpendWindow struct {
+	UsageWindow
+	UsedUSD  *float64 `json:"usedUsd,omitempty"`
+	LimitUSD *float64 `json:"limitUsd,omitempty"`
+	Period   string   `json:"period,omitempty"`
 }
 
 // Claude statuses (Session.ClaudeStatus). They come from Claude Code hooks
@@ -233,7 +270,10 @@ type RecentDirs interface {
 // up. Remove deletes only our entries. Both are idempotent.
 type HookInstaller interface {
 	HooksStatus(ctx context.Context) (string, error) // HooksInstalled / HooksOutdated / HooksMissing
-	InstallHooks(ctx context.Context) error
+	// InstallHooks installs the status hooks; with usage it also installs the
+	// status line wrapper that records Claude usage (§5.4), without it removes
+	// that wrapper (restoring the user's own status line).
+	InstallHooks(ctx context.Context, usage bool) error
 	RemoveHooks(ctx context.Context) error
 }
 
