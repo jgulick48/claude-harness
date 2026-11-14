@@ -51,6 +51,8 @@ export interface Candidate {
   host: string
   /** Colour tag name, matched by prefix so "red" finds red-tagged sessions. */
   color?: string
+  /** Git branch of the session's directory, matched like the label. */
+  branch?: string
 }
 
 export interface CandidateMatch {
@@ -61,7 +63,7 @@ export interface CandidateMatch {
 
 /**
  * Matches a session against a whitespace-separated query. Every token must
- * match the label, the path, the host name or the colour tag (any one of them).
+ * match the label, the path, the host name, the git branch or the colour tag (any one of them).
  */
 export function matchCandidate(query: string, c: Candidate): CandidateMatch | null {
   const tokens = query.trim().split(/\s+/).filter(Boolean)
@@ -72,11 +74,13 @@ export function matchCandidate(query: string, c: Candidate): CandidateMatch | nu
     const l = fuzzyMatch(tok, c.label)
     const p = fuzzyMatch(tok, c.path)
     const h = fuzzyMatch(tok, c.host)
+    const br = c.branch ? fuzzyMatch(tok, c.branch) : null
     const col = c.color && c.color.startsWith(tok.toLowerCase()) ? 100 + tok.length * 4 : null
     const best = Math.max(
       l ? l.score + 10 : -Infinity,
       p ? p.score : -Infinity,
       h ? h.score : -Infinity,
+      br ? br.score : -Infinity,
       col ?? -Infinity
     )
     if (best === -Infinity) return null

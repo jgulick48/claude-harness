@@ -514,7 +514,7 @@ export function Sidebar(): React.JSX.Element {
       ? orderSessions(state.sessions[host.id] ?? [], attentionSort).flatMap((s) => {
           const label = sessionLabel(s)
           const path = displayPath(s.cwd, host.home ?? '')
-          const m = matchCandidate(query, { label, path, host: host.name, color: s.color })
+          const m = matchCandidate(query, { label, path, host: host.name, color: s.color, branch: s.gitBranch })
           return m ? [{ s, label, path, labelIndices: m.labelIndices, score: m.score }] : []
         })
       : []
@@ -972,6 +972,17 @@ export function Sidebar(): React.JSX.Element {
                       <div className="row-path" title={s.cwd}>
                         {truncateMiddle(path, 36)}
                       </div>
+                      {s.gitBranch && (
+                        <div className="row-branch" data-testid="session-branch" title={s.gitBranch}>
+                          <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+                            <circle cx="4.5" cy="3.5" r="1.7" />
+                            <circle cx="4.5" cy="12.5" r="1.7" />
+                            <circle cx="11.5" cy="5.5" r="1.7" />
+                            <path d="M4.5 5.2v5.6M11.5 7.2c0 2.6-3.2 2.2-7 3.6" />
+                          </svg>
+                          <span className="row-branch-name">{s.gitBranch}</span>
+                        </div>
+                      )}
                     </div>
                   )
                 })}

@@ -99,9 +99,13 @@ type Session struct {
 	Managed     bool   `json:"managed"`         // created by this app (@harness_managed=1)
 	RunAs       string `json:"runAs,omitempty"` // @harness_run_as: user the session switched to
 	Cwd         string `json:"cwd"`             // active pane's current path
-	Windows     int    `json:"windows"`
-	Attached    int    `json:"attached"` // tmux clients attached, including ours
-	Created     int64  `json:"created"`  // unix seconds
+	// GitBranch is the git branch checked out in Cwd; "" when Cwd isn't a
+	// repo, HEAD is detached, the session is a run-as one, or it hasn't been
+	// looked up yet.
+	GitBranch string `json:"gitBranch,omitempty"`
+	Windows   int    `json:"windows"`
+	Attached  int    `json:"attached"` // tmux clients attached, including ours
+	Created   int64  `json:"created"`  // unix seconds
 	// ClaudeStatus is Claude Code's state in this session (see ClaudeWorking
 	// etc.); "" when Claude isn't running. ClaudeStatusAt is when the status
 	// last changed (unix seconds), 0 if unknown.
