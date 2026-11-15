@@ -1,10 +1,11 @@
-import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeTheme, powerMonitor, shell, type MenuItemConstructorOptions } from 'electron'
+import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeTheme, powerMonitor, screen, shell, type MenuItemConstructorOptions } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { resolveCorePath, startCore, type CoreInfo, type RunningCore } from './core'
 import { externalLink } from './links'
 import { UpdateController } from './updater'
+import { captureState, fitToDisplays, loadState, MIN_HEIGHT, MIN_WIDTH, saveState } from './windowState'
 
 type CoreStatus =
   | { state: 'starting' }
@@ -127,9 +128,17 @@ function setStatus(s: CoreStatus): void {
 }
 
 function createWindow(): void {
+  const stateFile = join(app.getPath('userData'), 'window-state.json')
+  const saved = fitToDisplays(
+    loadState(stateFile),
+    screen.getAllDisplays().map((d) => d.workArea)
+  )
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: saved.width,
+    height: saved.height,
+    ...(saved.x !== undefined && saved.y !== undefined ? { x: saved.x, y: saved.y } : { center: true }),
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
     show: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -137,6 +146,27 @@ function createWindow(): void {
       sandbox: true,
       nodeIntegration: false
     }
+  })
+  const win = mainWindow
+  if (saved.maximized) win.maximize()
+  if (saved.fullScreen) win.setFullScreen(true)
+  // Save on close, and shortly after any move/resize so a crash keeps it too.
+  // getNormalBounds() is the size to come back to when un-maximizing.
+  const save = (): void => {
+    if (win.isDestroyed() || win.isMinimized()) return
+    saveState(stateFile, captureState(win.getNormalBounds(), win.isMaximized(), win.isFullScreen()))
+  }
+  let saveTimer: ReturnType<typeof setTimeout> | null = null
+  const saveSoon = (): void => {
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(save, 500)
+  }
+  for (const ev of ['resize', 'move', 'maximize', 'unmaximize', 'enter-full-screen', 'leave-full-screen'] as const) {
+    win.on(ev as 'resize', saveSoon)
+  }
+  win.on('close', () => {
+    if (saveTimer) clearTimeout(saveTimer)
+    save()
   })
   mainWindow.on('ready-to-show', () => mainWindow?.show())
   mainWindow.on('closed', () => {
