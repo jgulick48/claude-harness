@@ -23,7 +23,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-COPY --from=web /src/ui/out/web/ internal/webserve/dist/
+COPY --from=web /src/ui/out/web/ internal/webserve/dist/web/
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags "-s -w -X github.com/jgulick48/claude-harness/internal/version.Version=${VERSION}" \
     -o /out/harness-core ./cmd/harness-core

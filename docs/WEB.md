@@ -172,7 +172,7 @@ Layouts and appearance stay in each browser's localStorage.
 ## 7. Docker
 
 The `Dockerfile` at the repo root has three stages: node 22 builds the web
-UI, Go builds `harness-core` with the UI embedded (`internal/webserve/dist`),
+UI, Go builds `harness-core` with the UI embedded (`internal/webserve/dist/web`),
 then `gcr.io/distroless/static-debian12:nonroot` runs it as 65532 with
 `HOME=/data`, `VOLUME /data`, `EXPOSE 8080`, and the default
 `ENTRYPOINT ["/harness-core", "serve"]`.

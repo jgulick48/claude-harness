@@ -68,7 +68,7 @@ func NewHandler(o Options) http.Handler {
 	case o.WebDir != "":
 		h.static = os.DirFS(o.WebDir)
 	default:
-		sub, err := fs.Sub(embeddedDist, "dist")
+		sub, err := fs.Sub(embeddedDist, "dist/web")
 		if err == nil {
 			h.static = sub
 		}

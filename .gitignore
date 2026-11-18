@@ -39,3 +39,6 @@ ui/out/
 ui/dist/
 *.log
 .DS_Store
+
+# Web UI build embedded by harness-core serve (make web)
+internal/webserve/dist/web/

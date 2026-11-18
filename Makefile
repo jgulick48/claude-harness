@@ -7,7 +7,7 @@
 help: ## List available targets
 	@echo "Targets:"
 	@echo "  core        Build bin/harness-core"
-	@echo "  web         Build the web UI and copy it into internal/webserve/dist (embedded by core)"
+	@echo "  web         Build the web UI and copy it into internal/webserve/dist/web (embedded by core)"
 	@echo "  docker.build  Build the Docker image (IMAGE, VERSION from ui/package.json)"
 	@echo "  docker.push   buildx build + push for PLATFORMS (default linux/amd64,linux/arm64) on BUILDER (casp-build)"
 	@echo "  test-core   Run Go tests with -race"
@@ -26,8 +26,8 @@ core:
 
 web:
 	cd ui && npm run build:web
-	find internal/webserve/dist -mindepth 1 ! -name .keep ! -name .gitignore -delete
-	cp -R ui/out/web/. internal/webserve/dist/
+	rm -rf internal/webserve/dist/web && mkdir -p internal/webserve/dist/web
+	cp -R ui/out/web/. internal/webserve/dist/web/
 
 test-core:
 	go test -race ./...
