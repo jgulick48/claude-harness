@@ -20,6 +20,7 @@ import (
 
 	"github.com/jgulick48/claude-harness/internal/api"
 	"github.com/jgulick48/claude-harness/internal/version"
+	"github.com/jgulick48/claude-harness/internal/webserve"
 )
 
 func main() {
@@ -32,6 +33,14 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string) int {
+	if len(args) > 0 {
+		switch args[0] {
+		case "serve":
+			return runServe(ctx, args[1:], stderr)
+		case "user":
+			return webserve.UserCmd(args[1:], stdin, stdout, stderr, os.LookupEnv)
+		}
+	}
 	fs := flag.NewFlagSet("harness-core", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	listen := fs.String("listen", "127.0.0.1:0", "address to listen on (loopback only)")

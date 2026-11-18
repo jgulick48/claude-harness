@@ -2,6 +2,8 @@
 
 A cross-platform desktop app (Windows, macOS, Linux) for running Claude Code across tmux sessions on many machines over SSH.
 
+It can also run as a Docker container that serves the same UI to browsers on your network, with its own SSH key and local-account or Authelia login. Every computer then sees the same hosts and sessions. See [docs/WEB.md](docs/WEB.md).
+
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and [docs/CORE_PROTOCOL.md](docs/CORE_PROTOCOL.md) for the core protocol.
 
 ## Claude Code instructions

@@ -10,6 +10,7 @@
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.e2e.json",
     "test": "vitest run",
+    "build:web": "vite build -c vite.web.config.ts",
     "package": "electron-vite build && electron-builder --dir --publish never",
     "dist": "electron-vite build && electron-builder --publish never",
     "release": "electron-vite build && electron-builder --publish always",

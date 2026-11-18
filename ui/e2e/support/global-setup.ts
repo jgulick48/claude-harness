@@ -16,4 +16,6 @@ export default function globalSetup(): void {
   run('go', ['build', '-o', sshtestdBin, './internal/sshconn/sshtest/cmd/sshtestd'], repoRoot)
   // Renderer (served over HTTP by the renderer suite) plus main and preload (launched by the electron suite).
   run('npx', ['electron-vite', 'build'], uiRoot)
+  // Browser build (served by harness-core serve); the web spec loads it.
+  run('npx', ['vite', 'build', '-c', 'vite.web.config.ts'], uiRoot)
 }

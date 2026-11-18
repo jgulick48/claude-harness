@@ -160,3 +160,23 @@ func TestRunHappyPath(t *testing.T) {
 		t.Fatal("run did not return after stdin EOF")
 	}
 }
+
+func TestServeDispatch(t *testing.T) {
+	// serve must refuse (exit 2) without a login method; HOME/XDG are
+	// redirected first because serve points them at the data dir.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HARNESS_DATA_DIR", t.TempDir())
+	t.Setenv("HARNESS_ADMIN_PASSWORD", "")
+	t.Setenv("HARNESS_OIDC_ISSUER", "")
+	var stderr bytes.Buffer
+	if code := run(context.Background(), []string{"serve"}, strings.NewReader(""), io.Discard, &stderr, os.Getenv); code != 2 {
+		t.Fatalf("code = %d, stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "no login method") {
+		t.Errorf("stderr = %s", stderr.String())
+	}
+	if code := run(context.Background(), []string{"user"}, strings.NewReader(""), io.Discard, io.Discard, os.Getenv); code != 2 {
+		t.Errorf("user usage code = %d", code)
+	}
+}

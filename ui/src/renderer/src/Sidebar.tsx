@@ -5,6 +5,7 @@ import { UpdateBanner } from './UpdateBanner'
 import { HooksDialog, type HooksMode } from './HooksDialog'
 import { HostCheckDialog } from './HostCheckDialog'
 import { UsageDialog } from './UsageDialog'
+import { ServerKeyDialog } from './ServerKeyDialog'
 import { SendPromptDialog } from './SendPromptDialog'
 import { keysWithStatus, pruneSelection, selKey, type PromptCandidate } from './sendPrompt'
 import { UsageIndicator } from './UsageIndicator'
@@ -234,6 +235,7 @@ function SettingsMenu({
   onAppearance,
   onUsage,
   onSendPrompt,
+  onServerKey,
   onClose
 }: {
   x: number
@@ -244,10 +246,13 @@ function SettingsMenu({
   onAppearance: () => void
   onUsage: () => void
   onSendPrompt: () => void
+  onServerKey: () => void
   onClose: () => void
 }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   useDismiss(ref, onClose)
+  // Only the browser build (docs/WEB.md section 6) has these.
+  const web = window.harnessWeb
   return (
     <div className="ctx-menu" ref={ref} style={{ left: x, top: y }} role="menu">
       <button className="ctx-item" role="menuitemcheckbox" aria-checked={notify} autoFocus onClick={onToggleNotify}>
@@ -265,6 +270,19 @@ function SettingsMenu({
       <button className="ctx-item" role="menuitem" onClick={onAppearance}>
         Appearance…
       </button>
+      {web && (
+        <>
+          <div className="ctx-confirm" data-testid="web-user">
+            Signed in as {web.me.user}
+          </div>
+          <button className="ctx-item" role="menuitem" onClick={onServerKey}>
+            Server SSH key…
+          </button>
+          <button className="ctx-item" role="menuitem" onClick={() => web.logout()}>
+            Sign out
+          </button>
+        </>
+      )}
     </div>
   )
 }
@@ -512,6 +530,7 @@ export function Sidebar(): React.JSX.Element {
   const [hooksDismissed, setHooksDismissed] = useState<Set<string>>(new Set())
   const [checkHost, setCheckHost] = useState<Host | null>(null)
   const [usageOpen, setUsageOpen] = useState(false)
+  const [serverKeyOpen, setServerKeyOpen] = useState(false)
   // Hosts showing CPU and memory (persisted), and hosts whose OS the core can't read (this session).
   const [loadHosts, setLoadHosts] = useState(() => loadLoadHosts())
   const [loadUnsupported, setLoadUnsupported] = useState<Set<string>>(new Set())
@@ -1198,6 +1217,10 @@ export function Sidebar(): React.JSX.Element {
             setSettings(null)
             openPrompt()
           }}
+          onServerKey={() => {
+            setSettings(null)
+            setServerKeyOpen(true)
+          }}
           onToggleNotify={() => {
             const v = !notify
             saveFlag(NOTIFICATIONS_KEY, v)
@@ -1228,6 +1251,9 @@ export function Sidebar(): React.JSX.Element {
           onClose={() => setPromptFor(null)}
           onSent={clearSelection}
         />
+      )}
+      {serverKeyOpen && window.harnessWeb && (
+        <ServerKeyDialog sshPublicKey={window.harnessWeb.me.sshPublicKey} onClose={() => setServerKeyOpen(false)} />
       )}
       {usageOpen && (
         <UsageDialog
