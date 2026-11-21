@@ -1,0 +1,10 @@
+.git
+.claude
+bin
+ui/node_modules
+ui/out
+ui/dist
+internal/webserve/dist/*
+!internal/webserve/dist/.keep
+!internal/webserve/dist/.gitignore
+*.log

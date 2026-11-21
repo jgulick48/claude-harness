@@ -39,6 +39,16 @@ import (
 // If the hosts file can't be loaded (e.g. it is corrupt) the error is logged
 // and the core runs with the local host only; the file is left untouched.
 func newHostManager(logger *slog.Logger, getenv func(string) string) session.HostManager {
+	hm, err := newHostManagerOpts(logger, getenv, true)
+	if err != nil {
+		panic(err) // unreachable: with the local host, errors fall back to localOnly
+	}
+	return hm
+}
+
+// newHostManagerOpts is newHostManager with the local host optional. Without
+// it (serve mode) a hosts-file error is returned instead of falling back.
+func newHostManagerOpts(logger *slog.Logger, getenv func(string) string, withLocal bool) (session.HostManager, error) {
 	tmuxOpts := tmuxbackend.Options{
 		Socket:    getenv("HARNESS_TMUX_SOCKET"),
 		Config:    getenv("HARNESS_TMUX_CONFIG"),
@@ -48,7 +58,10 @@ func newHostManager(logger *slog.Logger, getenv func(string) string) session.Hos
 	localOpts := tmuxOpts
 	localOpts.Bin = getenv("HARNESS_TMUX_BIN")
 	localOpts.Logger = logger.With("host", "local")
-	local := tmuxbackend.NewLocal(localOpts)
+	var local session.Backend
+	if withLocal {
+		local = tmuxbackend.NewLocal(localOpts)
+	}
 
 	sshTmux := tmuxOpts
 	sshTmux.Logger = logger
@@ -64,10 +77,13 @@ func newHostManager(logger *slog.Logger, getenv func(string) string) session.Hos
 		Logger:      logger,
 	})
 	if err != nil {
+		if !withLocal {
+			return nil, err
+		}
 		logger.Error("SSH hosts unavailable; running with the local host only", "err", err)
-		return localOnly{local}
+		return localOnly{local}, nil
 	}
-	return hm
+	return hm, nil
 }
 
 // localOnly is the fallback HostManager when the hosts file can't be used.

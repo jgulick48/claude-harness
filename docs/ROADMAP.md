@@ -21,6 +21,7 @@ and reviews, Haiku runs the mechanical steps.
 | 9 | ~~[Claude usage, phase 2: history](#5-claude-usage)~~ (done, 0.14.0) | M–L | `feature/usage-history` |
 | 10 | ~~[Send a prompt to several sessions](#8-send-a-prompt-to-several-sessions)~~ (done, 0.15.0) | M | `feature/broadcast` |
 | 11 | ~~[Host CPU and memory](#9-host-cpu-and-memory)~~ (done, 0.16.0) | S–M | `feature/host-load` |
+| 12 | ~~[Web UI and Docker server](WEB.md)~~ (done, 0.17.0) | L | `feature/web-ui` |
 
 ## Already done (no work needed)
 

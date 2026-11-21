@@ -12,5 +12,5 @@
     "esModuleInterop": true,
     "resolveJsonModule": true
   },
-  "include": ["electron.vite.config.ts", "vitest.config.mts", "src/main/**/*", "src/preload/**/*"]
+  "include": ["electron.vite.config.ts", "vite.web.config.ts", "vitest.config.mts", "src/main/**/*", "src/preload/**/*"]
 }

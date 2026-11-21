@@ -36,6 +36,10 @@ How the Electron app launches `harness-core` and talks to it. See
 
 The default for `--listen` is `127.0.0.1:0`.
 
+These rules, including the loopback requirement, apply to the desktop launch
+mode only. `harness-core serve` is a separate browser-facing mode with its own
+flags, authentication and listen rules; see [WEB.md](WEB.md).
+
 ## 2. Lifetime
 
 - Core shuts down gracefully, with exit code 0, when **stdin reaches EOF**,

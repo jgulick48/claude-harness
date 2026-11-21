@@ -1,0 +1,38 @@
+# Claude Harness web server. Secrets: create ./secrets/admin and
+# ./secrets/oidc (one value per file), or switch to plain environment values.
+# The named volume keeps users, the session key, the server's SSH key and
+# known_hosts across upgrades (docker compose pull && docker compose up -d).
+services:
+  claude-harness:
+    image: docker.io/jgulick48/claude-harness:latest
+    # Fixed hostname: it becomes the SSH key comment (claude-harness@claude-harness).
+    hostname: claude-harness
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      HARNESS_PUBLIC_URL: https://harness.threegm.com
+      HARNESS_TRUST_PROXY: "1"            # behind a TLS-terminating proxy
+      HARNESS_ADMIN_PASSWORD_FILE: /run/secrets/admin
+      HARNESS_OIDC_ISSUER: https://auth.threegm.com
+      HARNESS_OIDC_CLIENT_ID: claude-harness
+      HARNESS_OIDC_CLIENT_SECRET_FILE: /run/secrets/oidc
+      # HARNESS_OIDC_ALLOWED_GROUPS: admins
+    volumes:
+      - harness-data:/data
+    secrets:
+      - admin
+      - oidc
+    healthcheck:
+      # distroless has no shell or curl, so no in-container probe;
+      # point your orchestrator or proxy at GET /livez instead.
+      disable: true
+
+secrets:
+  admin:
+    file: ./secrets/admin
+  oidc:
+    file: ./secrets/oidc
+
+volumes:
+  harness-data:
