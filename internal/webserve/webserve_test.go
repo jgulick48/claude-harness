@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -72,7 +73,7 @@ func TestSessionKeyPersistsAndPerms(t *testing.T) {
 	if err != nil || !bytes.Equal(k1, k2) {
 		t.Fatal("key not persisted")
 	}
-	if st, _ := os.Stat(p); st.Mode().Perm() != 0o600 {
+	if st, _ := os.Stat(p); runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
 		t.Errorf("mode %v", st.Mode())
 	}
 }
@@ -91,7 +92,7 @@ func TestUsersStore(t *testing.T) {
 	if !u.Verify("alice", "pw1") || u.Verify("alice", "nope") || u.Verify("bob", "pw1") || u.Verify("alice", "") {
 		t.Error("verify results wrong")
 	}
-	if st, _ := os.Stat(p); st.Mode().Perm() != 0o600 {
+	if st, _ := os.Stat(p); runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
 		t.Errorf("mode %v", st.Mode())
 	}
 	raw, _ := os.ReadFile(p)
@@ -533,10 +534,10 @@ func TestEnsureSSHKey(t *testing.T) {
 		t.Fatalf("pub %q: %v %q", pub, err, comment)
 	}
 	priv := filepath.Join(dir, "id_ed25519")
-	if st, _ := os.Stat(priv); st.Mode().Perm() != 0o600 {
+	if st, _ := os.Stat(priv); runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
 		t.Errorf("private mode %v", st.Mode())
 	}
-	if st, _ := os.Stat(dir); st.Mode().Perm() != 0o700 {
+	if st, _ := os.Stat(dir); runtime.GOOS != "windows" && st.Mode().Perm() != 0o700 {
 		t.Errorf("dir mode %v", st.Mode())
 	}
 	b, _ := os.ReadFile(priv)
