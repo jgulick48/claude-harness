@@ -187,7 +187,12 @@ docker run -d --name claude-harness -p 8080:8080 -v harness-data:/data \
   docker.io/jgulick48/claude-harness:latest
 ```
 
-`deploy/docker-compose.yml` has the same as a compose file. `make docker.build`
-and `make docker.push` (buildx, `linux/amd64,linux/arm64`, the shared
-`casp-build` builder) build and publish the image, tagged with the
-`ui/package.json` version.
+`deploy/docker-compose.yml` has the same as a compose file.
+
+The release workflow builds the image (`linux/amd64,linux/arm64`) on every
+run and, when it publishes a `v*` tag, pushes `X.Y.Z` and `latest` to Docker
+Hub before the GitHub release is made public. It needs the repository
+secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub access
+token with read/write scope); publishing without them fails the release.
+`make docker.build` and `make docker.push` (buildx on the shared `casp-build`
+builder) do the same by hand.
